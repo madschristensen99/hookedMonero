@@ -25,16 +25,14 @@ module.exports = {
     },
   },
   etherscan: {
-    apiKey: {
-      unichain_testnet: process.env.ETHERSCAN_API_KEY || "placeholder",
-    },
+    apiKey: process.env.ETHERSCAN_API_KEY || "abc123",
     customChains: [
       {
         network: "unichain_testnet",
         chainId: 1301,
         urls: {
-          apiURL: "https://unichain-sepolia.blockscout.com/api",
-          browserURL: "https://unichain-sepolia.blockscout.com"
+          apiURL: "https://api-sepolia.uniscan.xyz/api",
+          browserURL: "https://sepolia.uniscan.xyz"
         }
       }
     ]

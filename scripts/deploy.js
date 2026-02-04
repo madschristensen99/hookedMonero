@@ -1,6 +1,7 @@
 const hre = require("hardhat");
 const fs = require("fs");
 const path = require("path");
+const axios = require("axios");
 
 async function main() {
   console.log("════════════════════════════════════════════════════════════════");
@@ -37,40 +38,61 @@ async function main() {
   console.log("");
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Step 2: Deploy WrappedMonero
+  // Step 2: Update Pyth Prices
   // ══════════════════════════════════════════════════════════════════════════
   
-  console.log("[2/2] Deploying WrappedMonero...");
+  console.log("[2/3] Updating Pyth prices on-chain...");
+  
+  const XMR_USD_PRICE_ID = "0x46b8cc9347f04391764a0361e0b17c3ba394b001e7c304f7650f6376e37c321d";
+  const ETH_USD_PRICE_ID = "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace";
+  
+  // Fetch price update data from Hermes
+  console.log("Fetching latest prices from Pyth Hermes...");
+  const hermesUrl = `https://hermes.pyth.network/v2/updates/price/latest?ids[]=${XMR_USD_PRICE_ID}&ids[]=${ETH_USD_PRICE_ID}`;
+  const response = await axios.get(hermesUrl);
+  
+  if (!response.data || !response.data.binary || !response.data.binary.data) {
+    throw new Error("Failed to fetch price data from Hermes");
+  }
+  
+  const priceUpdateData = response.data.binary.data.map(data => '0x' + data);
+  console.log("✓ Fetched price update data");
+  
+  // Update prices on Pyth contract
+  const pythAbi = [
+    "function updatePriceFeeds(bytes[] calldata updateData) external payable",
+    "function getUpdateFee(bytes[] calldata updateData) external view returns (uint256)",
+  ];
+  
+  const pyth = await hre.ethers.getContractAt(pythAbi, PYTH_ADDRESS);
+  const updateFee = await pyth.getUpdateFee(priceUpdateData);
+  
+  console.log("Updating prices (fee:", hre.ethers.formatEther(updateFee), "ETH)...");
+  const updateTx = await pyth.updatePriceFeeds(priceUpdateData, { value: updateFee });
+  await updateTx.wait();
+  console.log("✓ Prices updated on-chain");
+  console.log("");
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Step 3: Deploy WrappedMonero
+  // ══════════════════════════════════════════════════════════════════════════
+  
+  console.log("[3/3] Deploying WrappedMonero...");
   const WrappedMonero = await hre.ethers.getContractFactory("WrappedMonero");
   
-  // Get initial Pyth price data (you'll need to provide this)
-  // For now, we'll use placeholder values - in production, fetch from Pyth
-  const xmrPriceData = {
-    price: 15000000000n, // $150.00 (8 decimals)
-    conf: 1000000n,
-    expo: -8,
-    publishTime: Math.floor(Date.now() / 1000)
-  };
-  
-  const ethPriceData = {
-    price: 250000000000n, // $2500.00 (8 decimals)
-    conf: 10000000n,
-    expo: -8,
-    publishTime: Math.floor(Date.now() / 1000)
-  };
+  // Initial Monero block height (current mainnet height as of deployment)
+  const initialMoneroBlock = 3200000;
 
-  console.log("Initial prices:");
-  console.log("  XMR/USD: $150.00");
-  console.log("  ETH/USD: $2500.00");
+  console.log("Configuration:");
+  console.log("  Initial Monero Block:", initialMoneroBlock);
+  console.log("  Prices: Updated on Pyth contract");
   console.log("");
 
   const wrappedMonero = await WrappedMonero.deploy(
     verifierAddress,
     WSTETH_ADDRESS,
     PYTH_ADDRESS,
-    ORACLE_ADDRESS,
-    xmrPriceData,
-    ethPriceData
+    initialMoneroBlock
   );
   
   await wrappedMonero.waitForDeployment();

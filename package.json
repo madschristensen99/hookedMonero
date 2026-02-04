@@ -6,6 +6,7 @@
     "compile": "hardhat compile",
     "deploy": "hardhat run scripts/deploy.js",
     "deploy:unichain": "hardhat run scripts/deploy.js --network unichain_testnet",
+    "verify": "hardhat run scripts/verify.js --network unichain_testnet",
     "test": "hardhat test",
     "node": "hardhat node"
   },
@@ -26,6 +27,7 @@
   "dependencies": {
     "@openzeppelin/contracts": "^5.0.0",
     "@pythnetwork/pyth-sdk-solidity": "^3.0.0",
+    "axios": "^1.13.4",
     "dotenv": "^16.4.0"
   }
 }
