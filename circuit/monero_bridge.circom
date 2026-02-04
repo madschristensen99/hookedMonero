@@ -9,12 +9,12 @@ pragma circom 2.1.0;
 // ════════════════════════════════════════════════════════════════════════════
 
 // Poseidon hash for commitment (circomlib)
-include "./node_modules/circomlib/circuits/poseidon.circom";
+include "circomlib/circuits/poseidon.circom";
 
 // Utilities (from circomlib)
-include "./node_modules/circomlib/circuits/comparators.circom";
-include "./node_modules/circomlib/circuits/bitify.circom";
-include "./node_modules/circomlib/circuits/gates.circom";
+include "circomlib/circuits/comparators.circom";
+include "circomlib/circuits/bitify.circom";
+include "circomlib/circuits/gates.circom";
 
 // ════════════════════════════════════════════════════════════════════════════
 // ARCHITECTURE NOTES
