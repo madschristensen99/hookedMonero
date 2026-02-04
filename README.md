@@ -44,7 +44,10 @@ hookedMonero/
 ├── scripts/                    # Deployment & management scripts
 │   ├── deploy.js              # Main deployment script
 │   ├── verify.js              # Contract verification
-│   └── verify-args.js         # Verification arguments
+│   ├── verify-args.js         # Verification arguments
+│   └── oracle/                # Oracle management scripts
+│       ├── setup.sh           # Configure oracle
+│       └── run.sh             # Run oracle service
 │
 ├── deployments/                # Deployment records (gitignored except latest)
 │   └── unichain_testnet_latest.json
