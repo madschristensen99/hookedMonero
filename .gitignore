@@ -20,8 +20,9 @@ circuit/proof.json
 circuit/public.json
 circuit/witness.wtns
 
-# Generated Solidity verifiers (keep in git if needed for deployment)
-# circuit/build/MoneroBridgeVerifier.sol
+# Generated Solidity verifiers
+# Keep the one in contracts/ for deployment, ignore the one in build/
+circuit/build/*.sol
 
 # Test inputs/outputs
 circuit/input*.json

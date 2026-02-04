@@ -143,6 +143,12 @@ snarkjs zkey export solidityverifier \
 
 echo -e "${GREEN}✓ Solidity verifier generated${NC}"
 
+# Copy verifier to contracts folder for deployment
+if [ -f "${BUILD_DIR}/MoneroBridgeVerifier.sol" ]; then
+    cp ${BUILD_DIR}/MoneroBridgeVerifier.sol ../contracts/
+    echo -e "${GREEN}✓ Verifier copied to contracts/ folder${NC}"
+fi
+
 # ════════════════════════════════════════════════════════════════════════════
 # Summary
 # ════════════════════════════════════════════════════════════════════════════
@@ -158,7 +164,7 @@ echo -e "  • ${BUILD_DIR}/${CIRCUIT_NAME}_js/           - WASM witness calcula
 echo -e "  • ${BUILD_DIR}/${CIRCUIT_NAME}_cpp/          - C++ witness calculator"
 echo -e "  • ${BUILD_DIR}/${CIRCUIT_NAME}_final.zkey    - PLONK proving key"
 echo -e "  • ${BUILD_DIR}/verification_key.json         - Verification key"
-echo -e "  • ${BUILD_DIR}/MoneroBridgeVerifier.sol      - Solidity verifier contract"
+echo -e "  • ../contracts/MoneroBridgeVerifier.sol      - Solidity verifier (deployed)"
 
 echo -e "\n${BLUE}Next Steps:${NC}"
 echo -e "  1. Test witness generation with sample inputs"
