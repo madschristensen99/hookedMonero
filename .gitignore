@@ -80,6 +80,10 @@ artifacts/
 typechain/
 typechain-types/
 
+# Deployment records (keep latest for reference)
+deployments/*
+!deployments/*_latest.json
+
 # Foundry
 out/
 cache_forge/
