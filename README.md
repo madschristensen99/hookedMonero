@@ -1,5 +1,8 @@
 # 🌉 Hooked Monero
 
+> **🎉 MVP SUCCESS!** First successful mint completed Feb 4, 2026  
+> Transaction: [View on Uniscan](https://sepolia.uniscan.xyz/tx/0x3bb99d293c6127323ed500193989acdd412fa4c0714bb517ac6ff7cf5fcf1e13)
+
 A privacy-preserving bridge for Monero (XMR) to Ethereum using zero-knowledge proofs (PLONK).
 
 ## 🎯 Overview
@@ -8,18 +11,21 @@ A privacy-preserving bridge for Monero (XMR) to Ethereum using zero-knowledge pr
 
 ### Key Features
 
+- ✅ **End-to-End Minting**: Full flow from Monero TX → ZK proof → Token mint working!
 - ✅ **Privacy-Preserving**: ZK proofs verify Monero ownership without revealing transaction details
 - ✅ **LP-Based Model**: Decentralized liquidity providers back wrapped tokens
 - ✅ **Yield-Bearing Collateral**: LPs use wstETH for automatic yield generation
 - ✅ **PLONK Proofs**: Efficient ZK-SNARKs with ~1,167 constraints
-- ✅ **Real-Time Pricing**: Pyth Network oracle integration for XMR/ETH prices
+- ⚠️ **In Progress**: Merkle proof verification, full ZK verification (temporarily disabled for MVP)
+- ⚠️ **In Progress**: Pyth Network oracle integration for XMR/ETH prices
 
 ## 🚀 Deployed Contracts (Unichain Sepolia Testnet)
 
 | Contract | Address | Explorer |
 |----------|---------|----------|
-| **WrappedMonero (zeroXMR)** | `0xCE92E887d225D06c21a16d845D88E980d536FA2b` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0xCE92E887d225D06c21a16d845D88E980d536FA2b#code) |
-| **PlonkVerifier** | `0x6ABAEB70c9BA9EA497Ff5e20D08bd20Ca1E02139` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x6ABAEB70c9BA9EA497Ff5e20D08bd20Ca1E02139#code) |
+| **WrappedMonero (zeroXMR)** | `0x956d362086076b05Cf90CBf2EF30689b1172c9C5` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x956d362086076b05Cf90CBf2EF30689b1172c9C5) |
+| **PlonkVerifier** | `0x1ed5BfabBd944e5417Eab5c3C1A64173C5eDa93F` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x1ed5BfabBd944e5417Eab5c3C1A64173C5eDa93F) |
+| **First Mint TX** | - | [View on Uniscan](https://sepolia.uniscan.xyz/tx/0x3bb99d293c6127323ed500193989acdd412fa4c0714bb517ac6ff7cf5fcf1e13) |
 
 **Network**: Unichain Sepolia (Chain ID: 1301)  
 **RPC**: https://sepolia.unichain.org

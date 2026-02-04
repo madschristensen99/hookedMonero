@@ -27,6 +27,7 @@ use chrono::Utc;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sha3::Keccak256;
 use std::{env, time::Duration};
 use tokio::time::interval;
 use tracing::{error, info, warn};
@@ -390,6 +391,15 @@ fn compute_tx_merkle_root(tx_hashes: &[String]) -> B256 {
         return parse_hex_to_b256(&tx_hashes[0]).unwrap_or(B256::ZERO);
     }
 
+    // DEBUG: Log first and last TX
+    if tx_hashes.len() > 0 {
+        info!("   TX Merkle: {} transactions", tx_hashes.len());
+        info!("   First TX: {}", &tx_hashes[0]);
+        if tx_hashes.len() > 1 {
+            info!("   Last TX: {}", &tx_hashes[tx_hashes.len() - 1]);
+        }
+    }
+
     let mut level: Vec<[u8; 32]> = tx_hashes
         .iter()
         .filter_map(|h| {
@@ -408,20 +418,21 @@ fn compute_tx_merkle_root(tx_hashes: &[String]) -> B256 {
         let mut next_level = Vec::new();
 
         for chunk in level.chunks(2) {
-            let mut hasher = Sha256::new();
-            hasher.update(&chunk[0]);
-
+            // Use alloy keccak256 to match contract verification
+            use alloy::primitives::keccak256;
+            
+            let mut data = Vec::new();
+            data.extend_from_slice(&chunk[0]);
+            
             if chunk.len() > 1 {
-                hasher.update(&chunk[1]);
+                data.extend_from_slice(&chunk[1]);
             } else {
                 // Duplicate last hash for odd number
-                hasher.update(&chunk[0]);
+                data.extend_from_slice(&chunk[0]);
             }
 
-            let result = hasher.finalize();
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&result);
-            next_level.push(arr);
+            let hash = keccak256(&data);
+            next_level.push(hash.0);
         }
 
         level = next_level;
@@ -668,12 +679,13 @@ impl OracleService {
         info!("   TX Merkle Root: {}", tx_merkle_root);
         info!("   Output Merkle Root: {}", output_merkle_root);
 
+        // Try swapping blockHash and blockHeight to match struct order
         let tx = contract
             .postMoneroBlock(
                 U256::from(block_height),
-                block_hash,
-                tx_merkle_root,
-                output_merkle_root,
+                output_merkle_root,  // Try output first
+                block_hash,          // Then hash
+                tx_merkle_root,      // Then tx root
             )
             .send()
             .await;

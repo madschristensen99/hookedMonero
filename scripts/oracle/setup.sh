@@ -12,8 +12,13 @@ echo ""
 # Change to project root
 cd "$(dirname "$0")/../.."
 
-# Load deployment info
-DEPLOYMENT_FILE="deployments/unichain_testnet_latest.json"
+# Load deployment info (prefer mock deployment if it exists)
+if [ -f "deployments/unichain_testnet_mock_latest.json" ]; then
+    DEPLOYMENT_FILE="deployments/unichain_testnet_mock_latest.json"
+    echo "Using mock deployment"
+else
+    DEPLOYMENT_FILE="deployments/unichain_testnet_latest.json"
+fi
 
 if [ ! -f "$DEPLOYMENT_FILE" ]; then
     echo "❌ No deployment file found at $DEPLOYMENT_FILE"
