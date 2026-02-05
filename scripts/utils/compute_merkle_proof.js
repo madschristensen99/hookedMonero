@@ -32,7 +32,9 @@ async function computeTxMerkleProof(blockHeight, txHash) {
     console.log(`  Block has ${txHashes.length} transactions`);
     
     // 2. Find transaction index
-    const txIndex = txHashes.findIndex(hash => hash === txHash);
+    // Normalize txHash to remove 0x prefix if present
+    const normalizedTxHash = txHash.startsWith('0x') ? txHash.slice(2) : txHash;
+    const txIndex = txHashes.findIndex(hash => hash === normalizedTxHash);
     if (txIndex === -1) {
         throw new Error(`Transaction ${txHash} not found in block ${blockHeight}`);
     }

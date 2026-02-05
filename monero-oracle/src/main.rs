@@ -683,9 +683,9 @@ impl OracleService {
         let tx = contract
             .postMoneroBlock(
                 U256::from(block_height),
-                output_merkle_root,  // Try output first
-                block_hash,          // Then hash
-                tx_merkle_root,      // Then tx root
+                block_hash,
+                tx_merkle_root,
+                output_merkle_root,
             )
             .send()
             .await;

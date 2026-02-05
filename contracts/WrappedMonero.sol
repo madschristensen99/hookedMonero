@@ -500,7 +500,7 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         LPInfo storage lpData = lpInfo[lp];
         require(lpData.active, "LP not active");
         
-        // TEMP: Skip price updates
+        // TEMP: Skip price updates for now
         // if (priceUpdateData.length > 0) {
         //     uint256 pythFee = pyth.getUpdateFee(priceUpdateData);
         //     require(msg.value >= pythFee, "Insufficient fee");
@@ -512,8 +512,12 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         // }
         // _updatePrices();
         
-        // TEMP: Skip ALL verification for basic mint test
+        // Verify TX exists in Monero block via Merkle proof
         require(moneroBlocks[blockHeight].exists, "Block not posted");
+        require(
+            verifyTxInBlock(output.txHash, blockHeight, txMerkleProof, txIndex),
+            "TX not in block"
+        );
         
         // Get amount from public signals
         uint256 v = publicSignals[0];
@@ -716,12 +720,24 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     function verifyTxInBlock(
         bytes32 txHash,
         uint256 blockHeight,
-        bytes32[] calldata merkleProof,
+        bytes32[] memory merkleProof,
         uint256 index
     ) public view returns (bool) {
         require(moneroBlocks[blockHeight].exists, "Block not posted");
         bytes32 root = moneroBlocks[blockHeight].txMerkleRoot;
-        return verifyMerkleProof(txHash, root, merkleProof, index);
+        
+        // Manually verify instead of calling verifyMerkleProof to avoid calldata/memory issues
+        bytes32 computedHash = txHash;
+        for (uint256 i = 0; i < merkleProof.length; i++) {
+            bytes32 proofElement = merkleProof[i];
+            if (index % 2 == 0) {
+                computedHash = keccak256(abi.encodePacked(computedHash, proofElement));
+            } else {
+                computedHash = keccak256(abi.encodePacked(proofElement, computedHash));
+            }
+            index = index / 2;
+        }
+        return computedHash == root;
     }
     
     function verifyMerkleProof(
