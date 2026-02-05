@@ -32,7 +32,9 @@ async function computeTxMerkleProof(blockHeight, txHash) {
     console.log(`  Block has ${txHashes.length} transactions`);
     
     // 2. Find transaction index
-    const txIndex = txHashes.findIndex(hash => hash === txHash);
+    // Normalize txHash to remove 0x prefix if present
+    const normalizedTxHash = txHash.startsWith('0x') ? txHash.slice(2) : txHash;
+    const txIndex = txHashes.findIndex(hash => hash === normalizedTxHash);
     if (txIndex === -1) {
         throw new Error(`Transaction ${txHash} not found in block ${blockHeight}`);
     }
@@ -107,73 +109,80 @@ async function computeOutputMerkleProof(blockHeight, txHash, outputIndex) {
     }
     
     const block = blockResponse.data.result;
-    const blockJson = JSON.parse(block.json);
-    const allTxHashes = block.tx_hashes;
+    const allTxHashes = block.tx_hashes || [];
+    
+    if (allTxHashes.length === 0) {
+        console.log(`  No transactions in block`);
+        return { outputIndex: 0, proof: [] };
+    }
     
     console.log(`  Block has ${allTxHashes.length} transactions`);
+    console.log(`  Fetching transaction details...`);
     
-    // 2. Parse transaction data from block JSON
-    const allTxs = [];
+    // 2. Fetch all transactions using REST API endpoint
+    const rpcUrl = MONERO_RPC.replace('/json_rpc', '');
+    const txResponse = await axios.post(`${rpcUrl}/get_transactions`, {
+        txs_hashes: allTxHashes,
+        decode_as_json: true
+    });
     
-    // Add miner TX if present
-    if (blockJson.miner_tx) {
-        allTxs.push({
-            tx_hash: blockJson.miner_tx_hash || 'miner',
-            tx_json: blockJson.miner_tx
-        });
+    if (txResponse.data.status !== 'OK') {
+        throw new Error(`Failed to get transactions: ${txResponse.data.status}`);
     }
     
-    // Add regular transactions
-    if (blockJson.tx_hashes && blockJson.tx_hashes.length > 0) {
-        for (let i = 0; i < allTxHashes.length; i++) {
-            // Transaction JSON is in block.json but we need to parse it differently
-            // For now, use a simpler approach: just compute based on what we know
-            allTxs.push({
-                tx_hash: allTxHashes[i],
-                tx_json: null  // We'll handle this case
-            });
-        }
-    }
-    
-    console.log(`  Parsed ${allTxs.length} transaction entries from block`);
-    
-    // Since we can't easily get full TX data, use a simplified approach:
-    // Return empty proof for now - the contract will verify against oracle's root
-    console.log(`  ⚠️  Note: Full output Merkle proof computation requires transaction details`);
-    console.log(`  Using simplified approach with empty proof`);
-    
-    return {
-        outputIndex: 0,  // Assume first output for simplicity
-        proof: []
-    };
+    const transactions = txResponse.data.txs || [];
+    console.log(`  Fetched ${transactions.length} transactions`);
     
     // 3. Extract all outputs from all transactions
+    const { keccak256: ethersKeccak256, concat, zeroPadValue, toBeHex } = require('ethers');
+    const crypto = require('crypto');
+    
     const allOutputs = [];
     let targetGlobalIndex = -1;
     let currentGlobalIndex = 0;
     
-    for (const txData of allTxs) {
-        const tx = JSON.parse(txData.as_json);
-        const currentTxHash = txData.tx_hash;
+    // Normalize target TX hash
+    const normalizedTargetTx = txHash.startsWith('0x') ? txHash.slice(2) : txHash;
+    
+    for (const tx of transactions) {
+        const txJson = JSON.parse(tx.as_json);
+        const currentTxHash = tx.tx_hash;
         
-        for (let i = 0; i < tx.vout.length; i++) {
-            const output = tx.vout[i];
+        const vout = txJson.vout || [];
+        const rctSigs = txJson.rct_signatures || {};
+        const ecdhInfo = rctSigs.ecdhInfo || [];
+        const outPk = rctSigs.outPk || [];
+        
+        for (let i = 0; i < vout.length; i++) {
+            const output = vout[i];
             
-            // Extract output data matching oracle format
+            // Extract output public key
+            let outputPubKey;
+            if (output.target?.key) {
+                outputPubKey = output.target.key;
+            } else if (output.target?.tagged_key?.key) {
+                outputPubKey = output.target.tagged_key.key;
+            } else {
+                continue;
+            }
+            
+            // Get ECDH amount and commitment
+            const ecdhAmount = ecdhInfo[i]?.amount || '0'.repeat(16);
+            const commitment = outPk[i] || '0'.repeat(64);
+            
+            // Create output data matching oracle format
             const outputData = {
                 txHash: '0x' + currentTxHash,
                 outputIndex: i,
-                ecdhAmount: '0x' + (output.target?.tagged_key?.view_tag || '0000000000000000'),
-                outputPubKey: '0x' + (output.target?.tagged_key?.key || output.target?.key || '0'.repeat(64)),
-                commitment: '0x' + (output.amount || '0'.repeat(64))
+                ecdhAmount: '0x' + ecdhAmount.padStart(64, '0'),
+                outputPubKey: '0x' + outputPubKey,
+                commitment: '0x' + commitment
             };
             
             allOutputs.push(outputData);
             
-            // Check if this is our target output (normalize hashes by removing 0x)
-            const normalizedCurrent = currentTxHash.replace('0x', '');
-            const normalizedTarget = txHash.replace('0x', '');
-            if (normalizedCurrent === normalizedTarget && i === outputIndex) {
+            // Check if this is our target output
+            if (currentTxHash === normalizedTargetTx && i === outputIndex) {
                 targetGlobalIndex = currentGlobalIndex;
             }
             
@@ -190,7 +199,6 @@ async function computeOutputMerkleProof(blockHeight, txHash, outputIndex) {
     
     // 4. Build output Merkle tree using SHA256 (matches oracle)
     // Leaves are keccak256(abi.encodePacked(txHash, outputIndex, ecdhAmount, outputPubKey, commitment))
-    const { keccak256: ethersKeccak256, concat, zeroPadValue, toBeHex } = require('ethers');
     
     const leaves = allOutputs.map(output => {
         // Pack data like Solidity's abi.encodePacked
@@ -234,6 +242,26 @@ async function computeOutputMerkleProof(blockHeight, txHash, outputIndex) {
     }
     
     console.log(`  Output Merkle proof has ${proof.length} siblings`);
+    
+    // Debug: Verify proof by computing root
+    let computedHash = leaves[targetGlobalIndex];
+    let idx = targetGlobalIndex;
+    for (let i = 0; i < proof.length; i++) {
+        const sibling = Buffer.from(proof[i].slice(2), 'hex');
+        const hasher = crypto.createHash('sha256');
+        if (idx % 2 === 0) {
+            hasher.update(computedHash);
+            hasher.update(sibling);
+        } else {
+            hasher.update(sibling);
+            hasher.update(computedHash);
+        }
+        computedHash = hasher.digest();
+        idx = Math.floor(idx / 2);
+    }
+    const computedRoot = '0x' + computedHash.toString('hex');
+    console.log(`  Computed root from proof: ${computedRoot}`);
+    console.log(`  Expected root (from oracle): Check on-chain`);
     
     return {
         outputIndex: targetGlobalIndex,

@@ -357,7 +357,7 @@ async function main() {
     const output = {
         txHash: "0x" + TX_HASH,
         outputIndex: BigInt(OUTPUT_INDEX),
-        ecdhAmount: "0x" + ecdhAmount.padEnd(64, '0'),
+        ecdhAmount: "0x" + ecdhAmount.padStart(64, '0'),
         outputPubKey: "0x" + outputKey,
         commitment: "0x" + commitment,
         blockHeight: BigInt(BLOCK_HEIGHT)
