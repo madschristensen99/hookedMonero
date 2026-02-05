@@ -20,6 +20,7 @@
                     <div id="walletInfo" class="wallet-info hidden">
                         <span id="walletAddress" class="wallet-address"></span>
                         <span id="networkBadge" class="network-badge"></span>
+                        <button id="disconnectWallet" class="btn btn-secondary" style="margin-left: 12px;">Disconnect</button>
                     </div>
                 </div>
             </div>
@@ -301,10 +302,7 @@
     <!-- Toast Notifications -->
     <div id="toastContainer" class="toast-container"></div>
 
-    <!-- Web3 Library -->
-    <script src="https://cdn.ethers.io/lib/ethers-5.7.2.umd.min.js"></script>
-    
-    <!-- App Script -->
-    <script src="app.js"></script>
+    <!-- App Script (uses Viem via ES modules) -->
+    <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,4 +1,19 @@
 // ============================================
+// Viem Imports from CDN
+// ============================================
+import { 
+    createPublicClient, 
+    createWalletClient, 
+    custom,
+    http,
+    formatUnits,
+    parseUnits,
+    parseEther,
+    formatEther,
+    decodeEventLog
+} from 'https://esm.sh/viem@2.7.15';
+
+// ============================================
 // Configuration
 // ============================================
 const CONFIG = {
@@ -9,50 +24,212 @@ const CONFIG = {
     PICONERO_PER_XMR: 1e12,
 };
 
+// Define Unichain Sepolia chain
+const unichainSepolia = {
+    id: 1301,
+    name: 'Unichain Sepolia',
+    network: 'unichain-sepolia',
+    nativeCurrency: {
+        decimals: 18,
+        name: 'Ether',
+        symbol: 'ETH',
+    },
+    rpcUrls: {
+        default: {
+            http: ['https://sepolia.unichain.org'],
+        },
+        public: {
+            http: ['https://sepolia.unichain.org'],
+        },
+    },
+    blockExplorers: {
+        default: {
+            name: 'Uniscan',
+            url: 'https://sepolia.uniscan.xyz',
+        },
+    },
+    testnet: true,
+};
+
 // ============================================
 // State Management
 // ============================================
 let state = {
-    provider: null,
-    signer: null,
-    contract: null,
+    publicClient: null,
+    walletClient: null,
     userAddress: null,
     isConnected: false,
+    isConnecting: false,
     selectedLP: null,
 };
 
 // ============================================
-// Contract ABI (Simplified - Add full ABI later)
+// Contract ABI
 // ============================================
 const CONTRACT_ABI = [
-    "function balanceOf(address) view returns (uint256)",
-    "function lpInfo(address) view returns (tuple(uint256 collateralAmount, uint256 backedAmount, uint256 mintFeeBps, uint256 burnFeeBps, bool active))",
-    "function createMintIntent(address lp, uint256 expectedAmount) payable returns (uint256)",
-    "function requestBurn(address lp, uint256 amount, string xmrAddress) returns (uint256)",
-    "function registerLP(uint256 mintFeeBps, uint256 burnFeeBps, bool active)",
-    "function lpDeposit() payable",
-    "function getXmrEthPrice() view returns (uint256)",
-    "function getLPRatio(address lp) view returns (uint256)",
-    "function getLPAvailableCapacity(address lp) view returns (uint256)",
-    "function totalLPCollateral() view returns (uint256)",
-    "event MintIntentCreated(uint256 indexed intentId, address indexed user, address indexed lp, uint256 expectedAmount)",
-    "event BurnRequested(uint256 indexed burnId, address indexed user, address indexed lp, uint256 amount, string xmrAddress)",
+    {
+        inputs: [{ name: 'account', type: 'address' }],
+        name: 'balanceOf',
+        outputs: [{ name: '', type: 'uint256' }],
+        stateMutability: 'view',
+        type: 'function',
+    },
+    {
+        inputs: [{ name: 'lp', type: 'address' }],
+        name: 'lpInfo',
+        outputs: [{
+            components: [
+                { name: 'collateralAmount', type: 'uint256' },
+                { name: 'backedAmount', type: 'uint256' },
+                { name: 'mintFeeBps', type: 'uint256' },
+                { name: 'burnFeeBps', type: 'uint256' },
+                { name: 'active', type: 'bool' }
+            ],
+            name: '',
+            type: 'tuple'
+        }],
+        stateMutability: 'view',
+        type: 'function',
+    },
+    {
+        inputs: [
+            { name: 'lp', type: 'address' },
+            { name: 'expectedAmount', type: 'uint256' }
+        ],
+        name: 'createMintIntent',
+        outputs: [{ name: '', type: 'uint256' }],
+        stateMutability: 'payable',
+        type: 'function',
+    },
+    {
+        inputs: [
+            { name: 'lp', type: 'address' },
+            { name: 'amount', type: 'uint256' },
+            { name: 'xmrAddress', type: 'string' }
+        ],
+        name: 'requestBurn',
+        outputs: [{ name: '', type: 'uint256' }],
+        stateMutability: 'nonpayable',
+        type: 'function',
+    },
+    {
+        inputs: [
+            { name: 'mintFeeBps', type: 'uint256' },
+            { name: 'burnFeeBps', type: 'uint256' },
+            { name: 'active', type: 'bool' }
+        ],
+        name: 'registerLP',
+        outputs: [],
+        stateMutability: 'nonpayable',
+        type: 'function',
+    },
+    {
+        inputs: [],
+        name: 'lpDeposit',
+        outputs: [],
+        stateMutability: 'payable',
+        type: 'function',
+    },
+    {
+        inputs: [],
+        name: 'getXmrEthPrice',
+        outputs: [{ name: '', type: 'uint256' }],
+        stateMutability: 'view',
+        type: 'function',
+    },
+    {
+        inputs: [{ name: 'lp', type: 'address' }],
+        name: 'getLPRatio',
+        outputs: [{ name: '', type: 'uint256' }],
+        stateMutability: 'view',
+        type: 'function',
+    },
+    {
+        inputs: [{ name: 'lp', type: 'address' }],
+        name: 'getLPAvailableCapacity',
+        outputs: [{ name: '', type: 'uint256' }],
+        stateMutability: 'view',
+        type: 'function',
+    },
+    {
+        inputs: [],
+        name: 'totalLPCollateral',
+        outputs: [{ name: '', type: 'uint256' }],
+        stateMutability: 'view',
+        type: 'function',
+    },
+    {
+        anonymous: false,
+        inputs: [
+            { indexed: true, name: 'intentId', type: 'uint256' },
+            { indexed: true, name: 'user', type: 'address' },
+            { indexed: true, name: 'lp', type: 'address' },
+            { indexed: false, name: 'expectedAmount', type: 'uint256' }
+        ],
+        name: 'MintIntentCreated',
+        type: 'event',
+    },
+    {
+        anonymous: false,
+        inputs: [
+            { indexed: true, name: 'burnId', type: 'uint256' },
+            { indexed: true, name: 'user', type: 'address' },
+            { indexed: true, name: 'lp', type: 'address' },
+            { indexed: false, name: 'amount', type: 'uint256' },
+            { indexed: false, name: 'xmrAddress', type: 'string' }
+        ],
+        name: 'BurnRequested',
+        type: 'event',
+    },
 ];
 
 // ============================================
 // Initialization
 // ============================================
+// Wait for ethereum provider to be injected
+function waitForEthereum(timeout = 3000) {
+    return new Promise((resolve) => {
+        if (window.ethereum) {
+            resolve(window.ethereum);
+            return;
+        }
+
+        let timeoutId;
+        const checkInterval = setInterval(() => {
+            if (window.ethereum) {
+                clearInterval(checkInterval);
+                clearTimeout(timeoutId);
+                resolve(window.ethereum);
+            }
+        }, 100);
+
+        timeoutId = setTimeout(() => {
+            clearInterval(checkInterval);
+            resolve(null);
+        }, timeout);
+    });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('🌉 Hooked Monero Frontend Initialized');
+    
+    // Wait for wallet provider to be injected (Brave/MetaMask inject asynchronously)
+    console.log('⏳ Waiting for wallet provider...');
+    await waitForEthereum();
     
     // Setup event listeners
     setupEventListeners();
     
     // Check if wallet is already connected
-    if (typeof window.ethereum !== 'undefined') {
-        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-        if (accounts.length > 0) {
-            await connectWallet();
+    const provider = getEthereumProvider();
+    if (provider) {
+        try {
+            const accounts = await provider.request({ method: 'eth_accounts' });
+            if (accounts.length > 0) {
+                await connectWallet();
+            }
+        } catch (e) {
+            console.log('No accounts connected yet');
         }
     }
     
@@ -61,13 +238,57 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ============================================
+// Wallet Provider Detection
+// ============================================
+function getEthereumProvider() {
+    console.log('Checking for ethereum provider...');
+    console.log('window.ethereum exists:', !!window.ethereum);
+    console.log('window.ethereum.providers:', window.ethereum?.providers);
+    
+    // Check if there are multiple providers (e.g., Brave + MetaMask)
+    if (window.ethereum?.providers && Array.isArray(window.ethereum.providers) && window.ethereum.providers.length > 0) {
+        console.log('Found', window.ethereum.providers.length, 'providers');
+        window.ethereum.providers.forEach((p, i) => {
+            console.log(`Provider ${i}:`, {
+                isBraveWallet: p.isBraveWallet,
+                isMetaMask: p.isMetaMask,
+            });
+        });
+        
+        // Look for Brave Wallet specifically
+        const braveProvider = window.ethereum.providers.find(p => p.isBraveWallet);
+        if (braveProvider) {
+            console.log('✅ Using Brave Wallet from providers array');
+            return braveProvider;
+        }
+        // Otherwise return first provider
+        console.log('✅ Using first provider from array');
+        return window.ethereum.providers[0];
+    }
+    
+    // Single provider case
+    if (window.ethereum) {
+        console.log('✅ Using window.ethereum directly');
+        console.log('Provider flags:', {
+            isBraveWallet: window.ethereum.isBraveWallet,
+            isMetaMask: window.ethereum.isMetaMask,
+        });
+        return window.ethereum;
+    }
+    
+    console.log('❌ No ethereum provider found');
+    return null;
+}
+
+// ============================================
 // Event Listeners
 // ============================================
 function setupEventListeners() {
     // Wallet connection
     document.getElementById('connectWallet').addEventListener('click', connectWallet);
+    document.getElementById('disconnectWallet').addEventListener('click', disconnectWallet);
     
-    // Tab switching - FIXED
+    // Tab switching
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             const tabName = e.currentTarget.dataset.tab;
@@ -89,9 +310,10 @@ function setupEventListeners() {
     document.getElementById('depositCollateralBtn').addEventListener('click', depositCollateral);
     
     // Listen for account changes
-    if (typeof window.ethereum !== 'undefined') {
-        window.ethereum.on('accountsChanged', handleAccountsChanged);
-        window.ethereum.on('chainChanged', () => window.location.reload());
+    const provider = getEthereumProvider();
+    if (provider) {
+        provider.on('accountsChanged', handleAccountsChanged);
+        provider.on('chainChanged', () => window.location.reload());
     }
 }
 
@@ -99,8 +321,17 @@ function setupEventListeners() {
 // Wallet Connection
 // ============================================
 async function connectWallet() {
+    // Prevent multiple simultaneous connection attempts
+    if (state.isConnecting) {
+        console.log('Connection already in progress...');
+        return;
+    }
+    
     try {
-        if (typeof window.ethereum === 'undefined') {
+        state.isConnecting = true;
+        
+        const provider = getEthereumProvider();
+        if (!provider) {
             showToast('Please install MetaMask or another Web3 wallet', 'error');
             return;
         }
@@ -108,22 +339,31 @@ async function connectWallet() {
         showLoading('Connecting wallet...');
         
         // Request account access
-        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-        
-        // Setup provider and signer
-        state.provider = new ethers.providers.Web3Provider(window.ethereum);
-        state.signer = state.provider.getSigner();
+        const accounts = await provider.request({ method: 'eth_requestAccounts' });
         state.userAddress = accounts[0];
         state.isConnected = true;
         
-        // Check network
-        const network = await state.provider.getNetwork();
-        if (network.chainId !== CONFIG.CHAIN_ID) {
+        // Check network first (before creating clients)
+        const chainIdHex = await provider.request({ method: 'eth_chainId' });
+        const chainId = parseInt(chainIdHex, 16);
+        console.log('Current chain ID:', chainId);
+        
+        if (chainId !== CONFIG.CHAIN_ID) {
+            console.log('Wrong network, switching...');
             await switchNetwork();
         }
         
-        // Initialize contract
-        state.contract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, state.signer);
+        // Create Viem clients
+        state.walletClient = createWalletClient({
+            account: state.userAddress,
+            chain: unichainSepolia,
+            transport: custom(provider)
+        });
+        
+        state.publicClient = createPublicClient({
+            chain: unichainSepolia,
+            transport: http(CONFIG.RPC_URL)
+        });
         
         // Update UI
         updateWalletUI();
@@ -136,20 +376,46 @@ async function connectWallet() {
         console.error('Error connecting wallet:', error);
         hideLoading();
         showToast('Failed to connect wallet: ' + error.message, 'error');
+    } finally {
+        state.isConnecting = false;
     }
 }
 
+function disconnectWallet() {
+    state.publicClient = null;
+    state.walletClient = null;
+    state.userAddress = null;
+    state.isConnected = false;
+    state.isConnecting = false;
+    
+    updateWalletUI();
+    
+    // Reset UI values
+    document.getElementById('userBalance').textContent = '0.00';
+    document.getElementById('burnBalance').textContent = '0.00';
+    
+    showToast('Wallet disconnected', 'info');
+}
+
 async function switchNetwork() {
+    const provider = getEthereumProvider();
+    if (!provider) return;
+    
     try {
-        await window.ethereum.request({
+        console.log('Attempting to switch to Unichain Sepolia...');
+        await provider.request({
             method: 'wallet_switchEthereumChain',
             params: [{ chainId: '0x' + CONFIG.CHAIN_ID.toString(16) }],
         });
+        console.log('✅ Switched to Unichain Sepolia');
     } catch (switchError) {
-        // Network not added, try to add it
-        if (switchError.code === 4902) {
+        console.log('Switch error:', switchError);
+        
+        // Network not added, try to add it (error code 4902)
+        if (switchError.code === 4902 || switchError.code === -32603) {
             try {
-                await window.ethereum.request({
+                console.log('Network not found, adding Unichain Sepolia...');
+                await provider.request({
                     method: 'wallet_addEthereumChain',
                     params: [{
                         chainId: '0x' + CONFIG.CHAIN_ID.toString(16),
@@ -163,9 +429,14 @@ async function switchNetwork() {
                         blockExplorerUrls: [CONFIG.EXPLORER_URL]
                     }],
                 });
+                console.log('✅ Added Unichain Sepolia network');
             } catch (addError) {
-                throw new Error('Failed to add Unichain Sepolia network');
+                console.error('Failed to add network:', addError);
+                throw new Error('Please manually add Unichain Sepolia network to your wallet. Chain ID: 1301, RPC: ' + CONFIG.RPC_URL);
             }
+        } else if (switchError.code === 4001) {
+            // User rejected
+            throw new Error('Please switch to Unichain Sepolia network to continue');
         } else {
             throw switchError;
         }
@@ -218,19 +489,28 @@ async function loadInitialData() {
 }
 
 async function loadUserData() {
-    if (!state.contract || !state.userAddress) return;
+    if (!state.publicClient || !state.userAddress) return;
     
     try {
         // Load user balance
-        const balance = await state.contract.balanceOf(state.userAddress);
-        const balanceXMR = ethers.utils.formatUnits(balance, 12);
+        const balance = await state.publicClient.readContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'balanceOf',
+            args: [state.userAddress]
+        });
+        const balanceXMR = formatUnits(balance, 12);
         document.getElementById('userBalance').textContent = parseFloat(balanceXMR).toFixed(4) + ' XMR';
         document.getElementById('burnBalance').textContent = parseFloat(balanceXMR).toFixed(4);
         
         // Load XMR/ETH price
         try {
-            const price = await state.contract.getXmrEthPrice();
-            const priceFormatted = ethers.utils.formatEther(price);
+            const price = await state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: CONTRACT_ABI,
+                functionName: 'getXmrEthPrice'
+            });
+            const priceFormatted = formatEther(price);
             document.getElementById('xmrEthPrice').textContent = parseFloat(priceFormatted).toFixed(6) + ' ETH';
         } catch (e) {
             document.getElementById('xmrEthPrice').textContent = 'N/A';
@@ -238,8 +518,12 @@ async function loadUserData() {
         
         // Load total collateral
         try {
-            const totalCollateral = await state.contract.totalLPCollateral();
-            const collateralFormatted = ethers.utils.formatEther(totalCollateral);
+            const totalCollateral = await state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: CONTRACT_ABI,
+                functionName: 'totalLPCollateral'
+            });
+            const collateralFormatted = formatEther(totalCollateral);
             document.getElementById('totalCollateral').textContent = parseFloat(collateralFormatted).toFixed(4) + ' wstETH';
         } catch (e) {
             document.getElementById('totalCollateral').textContent = 'N/A';
@@ -254,34 +538,46 @@ async function loadUserData() {
 }
 
 async function loadLPInfo() {
-    if (!state.contract || !state.userAddress) return;
+    if (!state.publicClient || !state.userAddress) return;
     
     try {
-        const lpInfo = await state.contract.lpInfo(state.userAddress);
+        const lpInfo = await state.publicClient.readContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'lpInfo',
+            args: [state.userAddress]
+        });
         
-        if (lpInfo.collateralAmount.gt(0)) {
+        if (lpInfo.collateralAmount > 0n) {
             // User is an LP
-            const collateral = ethers.utils.formatEther(lpInfo.collateralAmount);
-            const backed = ethers.utils.formatUnits(lpInfo.backedAmount, 12);
+            const collateral = formatEther(lpInfo.collateralAmount);
+            const backed = formatUnits(lpInfo.backedAmount, 12);
             
             document.getElementById('lpCollateral').textContent = parseFloat(collateral).toFixed(4) + ' wstETH';
             document.getElementById('lpBacked').textContent = parseFloat(backed).toFixed(4) + ' XMR';
             
             // Load ratio
             try {
-                const ratio = await state.contract.getLPRatio(state.userAddress);
+                const ratio = await state.publicClient.readContract({
+                    address: CONFIG.CONTRACT_ADDRESS,
+                    abi: CONTRACT_ABI,
+                    functionName: 'getLPRatio',
+                    args: [state.userAddress]
+                });
                 document.getElementById('lpYourRatio').textContent = ratio.toString() + '%';
             } catch (e) {
+                console.log('Could not load LP ratio:', e.message);
                 document.getElementById('lpYourRatio').textContent = 'N/A';
             }
         }
     } catch (error) {
-        console.error('Error loading LP info:', error);
+        // Silently fail if user is not an LP or contract has issues
+        console.log('User is not an LP or LP info unavailable');
     }
 }
 
 // ============================================
-// Tab Switching - FIXED
+// Tab Switching
 // ============================================
 function switchTab(tabName) {
     // Update tab buttons
@@ -306,21 +602,31 @@ function handleLPSelection(event) {
     const lpAddress = event.target.value;
     state.selectedLP = lpAddress;
     
-    if (lpAddress && state.contract) {
+    if (lpAddress && state.publicClient) {
         loadLPDetails(lpAddress);
     }
 }
 
 async function loadLPDetails(lpAddress) {
     try {
-        const lpInfo = await state.contract.lpInfo(lpAddress);
+        const lpInfo = await state.publicClient.readContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'lpInfo',
+            args: [lpAddress]
+        });
         
-        document.getElementById('lpMintFee').textContent = (lpInfo.mintFeeBps / 100).toFixed(2) + '%';
+        document.getElementById('lpMintFee').textContent = (Number(lpInfo.mintFeeBps) / 100).toFixed(2) + '%';
         
         // Load capacity
         try {
-            const capacity = await state.contract.getLPAvailableCapacity(lpAddress);
-            const capacityXMR = ethers.utils.formatUnits(capacity, 12);
+            const capacity = await state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: CONTRACT_ABI,
+                functionName: 'getLPAvailableCapacity',
+                args: [lpAddress]
+            });
+            const capacityXMR = formatUnits(capacity, 12);
             document.getElementById('lpCapacity').textContent = parseFloat(capacityXMR).toFixed(4) + ' XMR';
         } catch (e) {
             document.getElementById('lpCapacity').textContent = 'N/A';
@@ -328,7 +634,12 @@ async function loadLPDetails(lpAddress) {
         
         // Load ratio
         try {
-            const ratio = await state.contract.getLPRatio(lpAddress);
+            const ratio = await state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: CONTRACT_ABI,
+                functionName: 'getLPRatio',
+                args: [lpAddress]
+            });
             document.getElementById('lpRatio').textContent = ratio.toString() + '%';
         } catch (e) {
             document.getElementById('lpRatio').textContent = 'N/A';
@@ -358,24 +669,42 @@ async function createMintIntent() {
         showLoading('Creating mint intent...');
         
         // Convert amount to piconero
-        const amountPiconero = ethers.utils.parseUnits(amount, 12);
-        const depositWei = ethers.utils.parseEther(deposit);
+        const amountPiconero = parseUnits(amount, 12);
+        const depositWei = parseEther(deposit);
         
-        const tx = await state.contract.createMintIntent(lpAddress, amountPiconero, {
+        const hash = await state.walletClient.writeContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'createMintIntent',
+            args: [lpAddress, amountPiconero],
             value: depositWei
         });
         
         showLoading('Waiting for confirmation...');
-        const receipt = await tx.wait();
+        const receipt = await state.publicClient.waitForTransactionReceipt({ hash });
         
         // Parse event to get intent ID
-        const event = receipt.events?.find(e => e.event === 'MintIntentCreated');
-        const intentId = event?.args?.intentId?.toString();
+        let intentId = 'N/A';
+        for (const log of receipt.logs) {
+            try {
+                const decoded = decodeEventLog({
+                    abi: CONTRACT_ABI,
+                    data: log.data,
+                    topics: log.topics
+                });
+                if (decoded.eventName === 'MintIntentCreated') {
+                    intentId = decoded.args.intentId.toString();
+                    break;
+                }
+            } catch (e) {
+                // Skip logs that don't match
+            }
+        }
         
         hideLoading();
         
         // Show instructions
-        document.getElementById('intentId').textContent = intentId || 'N/A';
+        document.getElementById('intentId').textContent = intentId;
         document.getElementById('xmrAddress').textContent = 'TODO: Get Monero address from LP';
         document.getElementById('mintInstructions').classList.remove('hidden');
         
@@ -424,12 +753,17 @@ async function requestBurn() {
     try {
         showLoading('Requesting burn...');
         
-        const amountPiconero = ethers.utils.parseUnits(amount, 12);
+        const amountPiconero = parseUnits(amount, 12);
         
-        const tx = await state.contract.requestBurn(lpAddress, amountPiconero, xmrAddress);
+        const hash = await state.walletClient.writeContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'requestBurn',
+            args: [lpAddress, amountPiconero, xmrAddress]
+        });
         
         showLoading('Waiting for confirmation...');
-        const receipt = await tx.wait();
+        await state.publicClient.waitForTransactionReceipt({ hash });
         
         hideLoading();
         showToast('Burn request submitted successfully!', 'success');
@@ -468,10 +802,15 @@ async function registerAsLP() {
     try {
         showLoading('Registering as LP...');
         
-        const tx = await state.contract.registerLP(mintFee, burnFee, active);
+        const hash = await state.walletClient.writeContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'registerLP',
+            args: [BigInt(mintFee), BigInt(burnFee), active]
+        });
         
         showLoading('Waiting for confirmation...');
-        await tx.wait();
+        await state.publicClient.waitForTransactionReceipt({ hash });
         
         hideLoading();
         showToast('Successfully registered as LP!', 'success');
@@ -502,12 +841,17 @@ async function depositCollateral() {
     try {
         showLoading('Depositing collateral...');
         
-        const amountWei = ethers.utils.parseEther(amount);
+        const amountWei = parseEther(amount);
         
-        const tx = await state.contract.lpDeposit({ value: amountWei });
+        const hash = await state.walletClient.writeContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'lpDeposit',
+            value: amountWei
+        });
         
         showLoading('Waiting for confirmation...');
-        await tx.wait();
+        await state.publicClient.waitForTransactionReceipt({ hash });
         
         hideLoading();
         showToast('Collateral deposited successfully!', 'success');
