@@ -11,12 +11,12 @@ import "./interfaces/IPlonkVerifier.sol";
 import "./libraries/Ed25519.sol";
 
 /**
- * @title WrappedMonero (zeroXMR) - Unichain Edition
+ * @title Hooked Monero (HookedXMR) - Unichain Edition
  * @notice LP-based Wrapped Monero with Pyth Oracle on Unichain
  * @dev Uses ETH for deposits and wstETH for yield-bearing collateral
  * 
  * Architecture:
- * - Each LP maintains their own collateral and backed zeroXMR
+ * - Each LP maintains their own collateral and backed HookedXMR
  * - LPs set their own mint/burn fees
  * - Users choose which LP to use for minting/burning
  * - Collateral ratios: 150% safe, 120-150% risk mode, <120% liquidatable
@@ -77,7 +77,7 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     // Per-LP state
     struct LPInfo {
         uint256 collateralAmount;     // wstETH amount deposited
-        uint256 backedAmount;         // zeroXMR amount this LP is backing
+        uint256 backedAmount;         // HookedXMR amount this LP is backing
         uint256 mintFeeBps;           // Mint fee in basis points (100 = 1%)
         uint256 burnFeeBps;           // Burn fee in basis points
         string moneroAddress;         // LP's Monero address (95 char base58)
@@ -104,7 +104,7 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     struct BurnRequest {
         address user;
         address lp;
-        uint256 amount;               // zeroXMR amount (locked)
+        uint256 amount;               // HookedXMR amount (locked)
         uint256 depositAmount;        // Anti-griefing deposit in ETH
         string xmrAddress;
         uint256 requestTime;
@@ -201,7 +201,7 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         address _wstETH,
         address _pyth,
         uint256 _initialMoneroBlock
-    ) ERC20("Wrapped Monero", "zeroXMR") ERC20Permit("Wrapped Monero") {
+    ) ERC20("Hooked Monero", "HookedXMR") ERC20Permit("Hooked Monero") {
         verifier = IPlonkVerifier(_verifier);
         wstETH = IWstETH(_wstETH);
         pyth = IPyth(_pyth);
@@ -525,6 +525,24 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
             "TX not in block"
         );
         
+        // Verify output exists in block's output Merkle tree
+        bytes32 outputLeaf = keccak256(abi.encodePacked(
+            output.txHash,
+            output.outputIndex,
+            output.ecdhAmount,
+            output.outputPubKey,
+            output.commitment
+        ));
+        require(
+            verifyMerkleProofSHA256(
+                outputLeaf,
+                moneroBlocks[blockHeight].outputMerkleRoot,
+                outputMerkleProof,
+                outputIndex
+            ),
+            "Output not in block"
+        );
+        
         // Get amount from public signals
         uint256 v = publicSignals[0];
         
@@ -558,8 +576,8 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     // ════════════════════════════════════════════════════════════════════════
     
     /**
-     * @notice Request burn - locks zeroXMR and LP collateral
-     * @param amount Amount of zeroXMR to burn (in piconero)
+     * @notice Request burn - locks HookedXMR and LP collateral
+     * @param amount Amount of HookedXMR to burn (in piconero)
      * @param xmrAddress Monero address to receive XMR
      * @param lp LP to process the burn
      */
