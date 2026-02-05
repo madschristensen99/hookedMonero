@@ -512,6 +512,12 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         // }
         // _updatePrices();
         
+        // Verify PLONK proof
+        require(
+            verifier.verifyProof(proof, publicSignals),
+            "Invalid ZK proof"
+        );
+        
         // Verify TX exists in Monero block via Merkle proof
         require(moneroBlocks[blockHeight].exists, "Block not posted");
         require(
