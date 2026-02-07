@@ -53,7 +53,7 @@ async function main() {
     deployment.contracts.PlonkVerifier,
     deployment.dependencies.wstETH,
     deployment.dependencies.pyth,
-    3200000, // initialMoneroBlock
+    deployment.initialMoneroBlock || 3605079, // Read from deployment file
   ];
 
   console.log("Constructor arguments:");

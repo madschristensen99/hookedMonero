@@ -2,18 +2,15 @@
   "network": "unichain_testnet",
   "chainId": "1301",
   "deployer": "0x492c0b9F298cC49FE2644a2EBc6eA8dF848c72FB",
-  "timestamp": "2026-02-07T23:21:25.268Z",
+  "timestamp": "2026-02-07T23:56:14.188Z",
   "contracts": {
-    "PlonkVerifier": "0xB6DD4B76eb906f5Ef403dF92D60Adbfc6D1cBba5",
-    "WrappedMonero": "0x1aFE6c215A3b7136dA30c405C436f668f3dec4BA",
-    "MintRelayer": "0xbF9Aff472b81D36971b3328f79fA661610fE8675",
-    "PrivacySwapHookFactory": "0x5941534Bce9585E3F54138B5F5C810Cf4c9dB1D3",
-    "PrivacySwapHook": "0x9CB59aa20ca57b4659007d1612068c81A518c0c0"
+    "PlonkVerifier": "0xC4F437a69C7Ee5a442706dc587f6B8F155933A64",
+    "WrappedMonero": "0x6b267bcc8669CEbf80E0b328f1f01D864B931cE9"
   },
   "dependencies": {
     "wstETH": "0xc02fe7317d4eb8753a02c35fe019786854a92001",
     "pyth": "0x2880aB155794e7179c9eE2e38200202908C17B43",
     "oracle": "0x492c0b9F298cC49FE2644a2EBc6eA8dF848c72FB"
   },
-  "initialMoneroBlock": 3605079
+  "initialMoneroBlock": 3605171
 }

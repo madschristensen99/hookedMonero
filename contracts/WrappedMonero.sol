@@ -70,7 +70,7 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     IPyth public immutable pyth;
     
     address public oracle;
-    uint256 public totalLPCollateral;    // Total wstETH collateral (for yield calculation)
+    uint256 public totalLPCollateral;    // Total wstETH collateral (for yield calculationn
     uint256 public lastYieldSnapshot;    // Last wstETH value snapshot
     
     // Per-LP state
@@ -654,12 +654,38 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     
     /**
      * @notice LP fulfills burn by proving XMR was sent
+     * @param burnId The burn request ID
+     * @param xmrTxHash Hash of the Monero transaction that sent XMR to user
+     * @param blockHeight Monero block height containing the transaction
+     * @param txMerkleProof Merkle proof that TX exists in the block
+     * @param txIndex Index of transaction in block
+     * @dev LP must cryptographically prove they sent XMR by providing Merkle proofs
      */
-    function fulfillBurn(uint256 burnId, bytes32 xmrTxHash) external nonReentrant {
+    function fulfillBurn(
+        uint256 burnId,
+        bytes32 xmrTxHash,
+        uint256 blockHeight,
+        bytes32[] calldata txMerkleProof,
+        uint256 txIndex
+    ) external nonReentrant {
         BurnRequest storage request = burnRequests[burnId];
         require(msg.sender == request.lp, "Not the LP");
         require(!request.fulfilled && !request.defaulted, "Already processed");
         require(block.timestamp <= request.requestTime + BURN_TIMEOUT, "Timeout");
+        
+        // Verify the Monero transaction exists in a posted block
+        require(moneroBlocks[blockHeight].exists, "Block not posted by oracle");
+        require(
+            verifyTxInBlock(xmrTxHash, blockHeight, txMerkleProof, txIndex),
+            "TX not in block - LP must prove XMR was sent"
+        );
+        
+        // Additional check: Block must be posted AFTER the burn was requested
+        // This prevents LP from reusing old transactions
+        require(
+            moneroBlocks[blockHeight].timestamp >= request.requestTime,
+            "TX predates burn request"
+        );
         
         request.fulfilled = true;
         

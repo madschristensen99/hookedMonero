@@ -80,10 +80,32 @@ async function main() {
   console.log("[3/3] Deploying WrappedMonero...");
   const WrappedMonero = await hre.ethers.getContractFactory("WrappedMonero");
   
-  // Initial Monero block height (set to just before our test transaction at 3605080)
-  const initialMoneroBlock = 3605079;
+  // Fetch current Monero blockchain height
+  console.log("Fetching current Monero blockchain height...");
+  const moneroRpcUrl = process.env.MONERO_RPC_URL || "http://xmr.privex.io:18081";
+  let initialMoneroBlock;
+  
+  try {
+    const moneroResponse = await axios.post(moneroRpcUrl + "/json_rpc", {
+      jsonrpc: "2.0",
+      id: "0",
+      method: "get_block_count"
+    });
+    
+    if (moneroResponse.data && moneroResponse.data.result && moneroResponse.data.result.count) {
+      // Use current height minus 1 (since count is height + 1)
+      initialMoneroBlock = moneroResponse.data.result.count - 1;
+      console.log("✓ Current Monero height:", initialMoneroBlock);
+    } else {
+      throw new Error("Invalid response from Monero RPC");
+    }
+  } catch (error) {
+    console.warn("⚠ Failed to fetch Monero height:", error.message);
+    console.warn("⚠ Using fallback height: 3605079");
+    initialMoneroBlock = 3605079;
+  }
 
-  console.log("Configuration:");
+  console.log("\nConfiguration:");
   console.log("  Initial Monero Block:", initialMoneroBlock);
   console.log("  Prices: Updated on Pyth contract");
   console.log("");
@@ -118,6 +140,7 @@ async function main() {
       pyth: PYTH_ADDRESS,
       oracle: ORACLE_ADDRESS,
     },
+    initialMoneroBlock: initialMoneroBlock,
   };
 
   const deploymentsDir = path.join(__dirname, "..", "deployments");
