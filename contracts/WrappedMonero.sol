@@ -55,7 +55,6 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     uint256 public constant BURN_TIMEOUT = 2 hours;
     uint256 public constant MAX_FEE_BPS = 500;          // Max 5% fee
     uint256 public constant MINT_INTENT_TIMEOUT = 2 hours;
-    uint256 public constant MIN_INTENT_DEPOSIT = 0.001 ether;  // 0.001 ETH minimum deposit
     uint256 public constant MIN_MINT_BPS = 100;         // Minimum 1% of LP capacity (Sybil defense)
     
     // Pyth price feed IDs
@@ -80,6 +79,7 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         uint256 backedAmount;         // HookedXMR amount this LP is backing
         uint256 mintFeeBps;           // Mint fee in basis points (100 = 1%)
         uint256 burnFeeBps;           // Burn fee in basis points
+        uint256 intentDepositBps;     // Intent deposit in basis points of mint amount (100 = 1%)
         string moneroAddress;         // LP's Monero address (95 char base58)
         bytes32 privateViewKey;       // LP's Monero private view key (for amount decryption)
         bool active;                  // Is LP accepting new mints?
@@ -306,12 +306,14 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     function registerLP(
         uint256 mintFeeBps,
         uint256 burnFeeBps,
+        uint256 intentDepositBps,
         string calldata moneroAddress,
         bytes32 privateViewKey,
         bool active
     ) external {
         require(mintFeeBps <= MAX_FEE_BPS, "Mint fee too high");
         require(burnFeeBps <= MAX_FEE_BPS, "Burn fee too high");
+        require(intentDepositBps <= 1000, "Intent deposit too high"); // Max 10%
         require(bytes(moneroAddress).length > 0, "Invalid Monero address");
         require(privateViewKey != bytes32(0), "Invalid private view key");
         
@@ -323,6 +325,7 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         
         lpInfo[msg.sender].mintFeeBps = mintFeeBps;
         lpInfo[msg.sender].burnFeeBps = burnFeeBps;
+        lpInfo[msg.sender].intentDepositBps = intentDepositBps;
         lpInfo[msg.sender].moneroAddress = moneroAddress;
         lpInfo[msg.sender].privateViewKey = privateViewKey;
         lpInfo[msg.sender].active = active;
@@ -438,7 +441,11 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     ) external payable nonReentrant returns (bytes32 intentId) {
         LPInfo storage lpData = lpInfo[lp];
         require(lpData.active, "LP not active");
-        require(msg.value >= MIN_INTENT_DEPOSIT, "Deposit too small");
+        
+        // Calculate required deposit based on LP's setting
+        uint256 expectedValueEth = _xmrToETH(expectedAmount);
+        uint256 requiredDeposit = (expectedValueEth * lpData.intentDepositBps) / 10000;
+        require(msg.value >= requiredDeposit, "Deposit too small");
         
         // Calculate LP's available capacity
         uint256 collateralValueEth = _wstETHToETH(lpData.collateralAmount);
@@ -477,20 +484,21 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     }
     
     /**
-     * @notice Cancel expired mint intent
+     * @notice LP claims deposit from expired mint intent
+     * @dev User had 2 hours to complete mint. If they don't, LP gets the deposit as compensation.
      */
-    function cancelMintIntent(bytes32 intentId) external nonReentrant {
+    function claimExpiredIntent(bytes32 intentId) external nonReentrant {
         MintIntent storage intent = mintIntents[intentId];
-        require(intent.user == msg.sender, "Not your intent");
+        require(intent.lp == msg.sender, "Not the LP for this intent");
         require(!intent.fulfilled, "Already fulfilled");
         require(!intent.cancelled, "Already cancelled");
-        require(block.timestamp > intent.createdAt + MINT_INTENT_TIMEOUT, "Not expired");
+        require(block.timestamp > intent.createdAt + MINT_INTENT_TIMEOUT, "Not expired yet");
         
         intent.cancelled = true;
         
-        // Refund ETH deposit
+        // Send deposit to LP as compensation for reserved capacity
         (bool success, ) = msg.sender.call{value: intent.depositAmount}("");
-        require(success, "Refund failed");
+        require(success, "Transfer failed");
         
         emit MintIntentCancelled(intentId);
     }
@@ -604,9 +612,13 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         address lp
     ) external payable nonReentrant {
         require(balanceOf(msg.sender) >= amount, "Insufficient balance");
-        require(msg.value >= MIN_INTENT_DEPOSIT, "Deposit too small");
         
         LPInfo storage lpData = lpInfo[lp];
+        
+        // Calculate required deposit based on LP's setting
+        uint256 burnValueEth = _xmrToETH(amount);
+        uint256 requiredDeposit = (burnValueEth * lpData.intentDepositBps) / 10000;
+        require(msg.value >= requiredDeposit, "Deposit too small");
         require(lpData.backedAmount >= amount, "LP cannot cover");
         
         // Calculate collateral to lock

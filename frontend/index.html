@@ -67,7 +67,7 @@
                 <div class="tabs">
                     <button class="tab-btn active" data-tab="mint">Mint Hooked XMR</button>
                     <button class="tab-btn" data-tab="burn">Burn Hooked XMR</button>
-                    <button class="tab-btn" data-tab="lp">Become LP</button>
+                    <button class="tab-btn" data-tab="lp" id="lpTabBtn">Become LP</button>
                 </div>
 
                 <!-- Mint Tab -->
@@ -100,7 +100,7 @@
                         <div class="form-group">
                             <label for="mintAmount">Amount (XMR)</label>
                             <input type="number" id="mintAmount" class="input" placeholder="0.00" step="0.001" min="0.001">
-                            <p class="input-hint">Minimum: 0.001 XMR</p>
+                            <p class="input-hint">Minimum: 1% of LP's available capacity</p>
                         </div>
 
                         <div class="form-group">
@@ -140,6 +140,14 @@
                                     <p class="step-title">Mint Tokens</p>
                                     <p class="step-desc">Submit proof and receive Hooked XMR</p>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- Active Mint Intents -->
+                        <div class="card mt-3">
+                            <h3>Your Active Mint Intents</h3>
+                            <div id="activeIntentsList">
+                                <p class="empty-state">No active mint intents</p>
                             </div>
                         </div>
 
@@ -220,23 +228,19 @@
 
                 <!-- LP Tab -->
                 <div id="lpTab" class="tab-content">
-                    <div class="card">
+                    <!-- Non-LP View -->
+                    <div id="nonLpView" class="card">
                         <h2>💎 Become a Liquidity Provider</h2>
                         <p class="description">Earn fees by providing liquidity for the Monero bridge.</p>
-                        
-                        <div class="lp-stats">
-                            <div class="lp-stat">
-                                <p class="lp-stat-label">Your Collateral</p>
-                                <p class="lp-stat-value" id="lpCollateral">0.00 wstETH</p>
-                            </div>
-                            <div class="lp-stat">
-                                <p class="lp-stat-label">Backed Amount</p>
-                                <p class="lp-stat-value" id="lpBacked">0.00 XMR</p>
-                            </div>
-                            <div class="lp-stat">
-                                <p class="lp-stat-label">Your Ratio</p>
-                                <p class="lp-stat-value" id="lpYourRatio">-</p>
-                            </div>
+
+                        <div class="alert alert-info">
+                            <h4>📚 LP Requirements:</h4>
+                            <ul>
+                                <li>Maintain 150% collateral ratio (safe zone)</li>
+                                <li>Below 120% = liquidatable</li>
+                                <li>Must fulfill burn requests within 2 hours</li>
+                                <li>Earn yield on wstETH collateral + bridge fees</li>
+                            </ul>
                         </div>
 
                         <div class="form-group">
@@ -252,32 +256,114 @@
                         </div>
 
                         <div class="form-group">
+                            <label for="lpIntentDepositInput">Intent Deposit (basis points)</label>
+                            <input type="number" id="lpIntentDepositInput" class="input" placeholder="100" min="0" max="1000">
+                            <p class="input-hint">Anti-griefing deposit as % of mint amount. 100 = 1%, Max: 1000 (10%)</p>
+                        </div>
+
+                        <div class="form-group">
                             <label for="lpMoneroAddress">Your Monero Address</label>
                             <input type="text" id="lpMoneroAddress" class="input" placeholder="44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A">
-                            <p class="input-hint">Users will send XMR to this address for mints. You'll be active immediately.</p>
+                            <p class="input-hint">Users will send XMR to this address for mints.</p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="lpPrivateViewKey">Monero Private View Key</label>
+                            <input type="text" id="lpPrivateViewKey" class="input" placeholder="0x0000000000000000000000000000000000000000000000000000000000000000">
+                            <p class="input-hint">⚠️ Required for amount verification. This will be stored publicly on-chain to decrypt transaction amounts. Never share your spend key!</p>
                         </div>
 
                         <button id="registerLpBtn" class="btn btn-large btn-primary">Register as LP</button>
+                    </div>
+
+                    <!-- Existing LP View -->
+                    <div id="existingLpView" class="card" style="display: none;">
+                        <h2>💎 Manage LP Position</h2>
+                        <p class="description">Monitor and manage your liquidity provider position</p>
+
+                        <!-- LP Stats -->
+                        <div class="lp-stats">
+                            <div class="lp-stat">
+                                <p class="lp-stat-label">Collateral</p>
+                                <p class="lp-stat-value" id="lpCollateral">0.00 wstETH</p>
+                            </div>
+                            <div class="lp-stat">
+                                <p class="lp-stat-label">Backed Amount</p>
+                                <p class="lp-stat-value" id="lpBacked">0.00 XMR</p>
+                            </div>
+                            <div class="lp-stat">
+                                <p class="lp-stat-label">Collateral Ratio</p>
+                                <p class="lp-stat-value" id="lpYourRatio">-</p>
+                            </div>
+                            <div class="lp-stat">
+                                <p class="lp-stat-label">Status</p>
+                                <p class="lp-stat-value" id="lpStatus">Active</p>
+                            </div>
+                        </div>
+
+                        <!-- LP Configuration -->
+                        <div class="card mt-3">
+                            <h3>Current Configuration</h3>
+                            <div style="display: grid; gap: 0.5rem;">
+                                <div style="display: flex; justify-content: space-between;">
+                                    <span style="color: var(--text-secondary);">Mint Fee:</span>
+                                    <span id="lpCurrentMintFee" style="font-weight: 600;">-</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between;">
+                                    <span style="color: var(--text-secondary);">Burn Fee:</span>
+                                    <span id="lpCurrentBurnFee" style="font-weight: 600;">-</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between;">
+                                    <span style="color: var(--text-secondary);">Monero Address:</span>
+                                    <span id="lpCurrentMoneroAddress" style="font-family: monospace; font-size: 0.85em; word-break: break-all;">-</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Update Settings -->
+                        <div class="card mt-3">
+                            <h3>Update Settings</h3>
+                            <div class="form-group">
+                                <label for="lpUpdateMintFee">New Mint Fee (basis points)</label>
+                                <input type="number" id="lpUpdateMintFee" class="input" placeholder="Current: -" min="0" max="500">
+                            </div>
+                            <div class="form-group">
+                                <label for="lpUpdateBurnFee">New Burn Fee (basis points)</label>
+                                <input type="number" id="lpUpdateBurnFee" class="input" placeholder="Current: -" min="0" max="500">
+                            </div>
+                            <div class="form-group">
+                                <label for="lpUpdateMoneroAddress">New Monero Address</label>
+                                <input type="text" id="lpUpdateMoneroAddress" class="input" placeholder="44AFFq5k...">
+                            </div>
+                            <div class="form-group">
+                                <label for="lpUpdatePrivateViewKey">New Private View Key</label>
+                                <input type="text" id="lpUpdatePrivateViewKey" class="input" placeholder="0x0000...">
+                            </div>
+                            <div class="form-group">
+                                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <input type="checkbox" id="lpActiveToggle"> Active (accepting new mints)
+                                </label>
+                            </div>
+                            <button id="updateLpBtn" class="btn btn-large btn-primary">Update LP Settings</button>
+                        </div>
 
                         <div class="divider"></div>
 
-                        <h3>Deposit Collateral</h3>
+                        <!-- Collateral Management -->
+                        <h3>Collateral Management</h3>
                         <div class="form-group">
-                            <label for="lpDepositAmount">Amount (ETH)</label>
+                            <label for="lpDepositAmount">Deposit Amount (ETH)</label>
                             <input type="number" id="lpDepositAmount" class="input" placeholder="0.00" step="0.01" min="0.01">
                             <p class="input-hint">Will be converted to wstETH for yield generation</p>
                         </div>
-
                         <button id="depositCollateralBtn" class="btn btn-large btn-secondary">Deposit Collateral</button>
 
-                        <div class="alert alert-info mt-3">
-                            <h4>📚 LP Requirements:</h4>
-                            <ul>
-                                <li>Maintain 150% collateral ratio (safe zone)</li>
-                                <li>Below 120% = liquidatable</li>
-                                <li>Must fulfill burn requests within 2 hours</li>
-                                <li>Earn yield on wstETH collateral + bridge fees</li>
-                            </ul>
+                        <!-- Performance Stats (Placeholder for future) -->
+                        <div class="card mt-3">
+                            <h3>📊 Performance Stats</h3>
+                            <div class="alert alert-info">
+                                <p>Coming soon: Average fulfillment time, fulfill rate, PnL tracking, and more!</p>
+                            </div>
                         </div>
                     </div>
                 </div>
