@@ -399,3 +399,133 @@ For issues or questions:
 ---
 
 **⚠️ Security Notice**: This is experimental software. Always test thoroughly before using in production. Never share your private keys or fresh address private keys insecurely.
+
+## PrivacySwap Hook: Private Token Acquisition
+
+### Overview
+
+The **PrivacySwap Hook** extends the privacy-preserving capabilities of the MintRelayer system by enabling **atomic swaps from wXMR to any token** via Uniswap v4. This allows users to privately acquire any token without revealing their identity or transaction history.
+
+### How It Works
+
+```
+Monero TX → wXMR (private mint) → Any Token (private swap) → Fresh Address
+                                    ↓
+                            [PrivacySwap Hook]
+                            - Atomic execution
+                            - No on-chain links
+                            - Complete privacy
+```
+
+### Key Features
+
+1. **Atomic Mint + Swap**
+   - Single transaction combines minting wXMR and swapping to desired token
+   - No intermediate steps where privacy could leak
+   - MEV protection via slippage limits
+
+2. **Universal Token Support**
+   - Works with any token that has wXMR liquidity on Uniswap v4
+   - Multi-hop swaps supported
+   - Optimal routing through liquidity pools
+
+3. **Complete Privacy**
+   - No connection between Monero sender and token recipient
+   - Fresh address receives final tokens
+   - Relayer pays all gas fees
+
+### Usage Example
+
+```javascript
+// 1. User sends Monero to LP
+// 2. Register swap intent
+const swapIntent = {
+    recipient: "0xFRESH_ADDRESS",
+    outputToken: USDC_ADDRESS,
+    minAmountOut: parseUnits("150", 6), // Minimum 150 USDC
+    deadline: Math.floor(Date.now() / 1000) + 3600,
+    zeroForOne: true,
+    moneroTxHash: "0x..."
+};
+
+// 3. Relayer executes privateMintAndSwap()
+await privacySwapHook.privateMintAndSwap(
+    mintIntent,
+    mintSignature,
+    proof,
+    publicSignals,
+    dleqProof,
+    ed25519Proof,
+    output,
+    blockHeight,
+    txMerkleProof,
+    txIndex,
+    outputMerkleProof,
+    outputGlobalIndex,
+    swapIntent,
+    poolKey
+);
+
+// 4. User receives USDC at fresh address with complete privacy!
+```
+
+### Privacy Flow
+
+```
+Step 1: User sends 0.1 XMR to LP's Monero address
+        ↓
+Step 2: Relayer mints wXMR to PrivacySwapHook contract
+        ↓
+Step 3: Hook automatically swaps wXMR → USDC via Uniswap v4
+        ↓
+Step 4: USDC sent to fresh address
+        ↓
+Result: User has USDC with NO on-chain link to Monero transaction
+```
+
+### Benefits
+
+- 🔒 **Complete Anonymity**: No connection between Monero sender and token holder
+- ⚡ **One Transaction**: Mint + Swap executed atomically
+- 💰 **Gas Efficient**: Leverages Uniswap v4 hooks for minimal overhead
+- 🌐 **Universal**: Works with any token (USDC, WETH, DAI, etc.)
+- 🛡️ **MEV Protected**: Slippage limits prevent sandwich attacks
+
+### Supported Tokens
+
+Any token with wXMR liquidity on Uniswap v4:
+- **Stablecoins**: USDC, USDT, DAI
+- **Major Tokens**: WETH, WBTC
+- **DeFi Tokens**: UNI, AAVE, COMP
+- **Custom Tokens**: Any ERC-20 with liquidity
+
+### Gas Costs
+
+| Operation | Gas Cost |
+|-----------|----------|
+| Register Intent | ~50,000 |
+| Private Mint | ~570,000 |
+| Swap Execution | ~150,000 |
+| **Total** | **~770,000** |
+
+*Relayer pays all gas costs*
+
+### Documentation
+
+For detailed information about PrivacySwap Hook:
+- [PrivacySwap Documentation](PRIVACY_SWAP_README.md)
+- [Uniswap v4 Hooks](https://docs.uniswap.org/contracts/v4/overview)
+- [Contract Source](contracts/PrivacySwapHook.sol)
+
+---
+
+## Support
+
+For issues or questions:
+- GitHub Issues: [Create an issue](https://github.com/your-repo/issues)
+- Discord: [Join our server](#)
+- Email: support@hookedmonero.com
+
+---
+
+**⚠️ Security Notice**: This is experimental software. Always test thoroughly before using in production. Never share your private keys or fresh address private keys insecurely.

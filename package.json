@@ -26,7 +26,10 @@
   "license": "MIT",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "hardhat": "^2.22.0"
+    "@uniswap/v4-core": "^1.0.2",
+    "@uniswap/v4-periphery": "^1.0.3",
+    "hardhat": "^2.22.0",
+    "hardhat-preprocessor": "^0.1.5"
   },
   "dependencies": {
     "@noble/ed25519": "^2.0.0",

@@ -4,7 +4,7 @@ require("dotenv").config();
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
-    version: "0.8.20",
+    version: "0.8.24",
     settings: {
       optimizer: {
         enabled: true,
@@ -12,6 +12,20 @@ module.exports = {
       },
       viaIR: true, // Required for large contracts like the PLONK verifier
     },
+  },
+  paths: {
+    sources: "./contracts",
+    tests: "./test",
+    cache: "./cache",
+    artifacts: "./artifacts",
+    // Tell Hardhat where to find external libraries
+    external: {
+      contracts: [
+        {
+          artifacts: "node_modules"
+        }
+      ]
+    }
   },
   networks: {
     hardhat: {
