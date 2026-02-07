@@ -2,11 +2,10 @@
   "network": "unichain_testnet",
   "chainId": "1301",
   "deployer": "0x492c0b9F298cC49FE2644a2EBc6eA8dF848c72FB",
-  "timestamp": "2026-02-07T22:15:46.653Z",
+  "timestamp": "2026-02-07T20:28:28.807Z",
   "contracts": {
-    "PlonkVerifier": "0x779DA9ac5Cb031E86f4e505Bc11AE97731a8e518",
-    "WrappedMonero": "0x1aFE6c215A3b7136dA30c405C436f668f3dec4BA",
-    "MintRelayer": "0xbF9Aff472b81D36971b3328f79fA661610fE8675"
+    "PlonkVerifier": "0xB6DD4B76eb906f5Ef403dF92D60Adbfc6D1cBba5",
+    "WrappedMonero": "0xF34aB06216d5323bA22f6f439717aCBbA7782009"
   },
   "dependencies": {
     "wstETH": "0xc02fe7317d4eb8753a02c35fe019786854a92001",
