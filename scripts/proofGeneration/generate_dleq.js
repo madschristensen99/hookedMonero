@@ -205,7 +205,10 @@ async function computeEd25519Operations(r, A_compressed, B_compressed, H_s) {
     
     // 4. Compute P = H_s·G + B (stealth address)
     console.log('   4. Computing P = H_s·G + B...');
-    const H_s_scalar = BigInt('0x' + H_s.replace(/^0x/, '')) % L;
+    console.log('      H_s input:', H_s, 'type:', typeof H_s);
+    const H_s_str = typeof H_s === 'string' ? H_s : (H_s ? H_s.toString('hex') : 'undefined');
+    console.log('      H_s_str:', H_s_str);
+    const H_s_scalar = BigInt('0x' + H_s_str.replace(/^0x/, '')) % L;
     const H_s_G = G.multiply(H_s_scalar);
     const P = H_s_G.add(B);
     const P_compressed = Buffer.from(P.toHex()).toString('hex');

@@ -289,3 +289,6 @@ datasets/
 
 # Keep the Solidity verifier if it's part of the deployment
 !contracts/MoneroBridgeVerifier.sol
+
+# Transaction data with sensitive keys
+transaction_data.json
