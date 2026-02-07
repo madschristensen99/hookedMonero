@@ -19,7 +19,7 @@ import {
 const CONFIG = {
     CHAIN_ID: 1301, // Unichain Sepolia
     RPC_URL: 'https://sepolia.unichain.org',
-    CONTRACT_ADDRESS: '0x4973915d4A57C6b7A4F016354dD73CC0276FC1b2',
+    CONTRACT_ADDRESS: '0x926d2A429709c87eC4dc62DC469172ea8e3689Dc', // Mock deployment - LP sets intent deposit
     EXPLORER_URL: 'https://sepolia.uniscan.xyz',
     PICONERO_PER_XMR: 1e12,
 };
@@ -84,6 +84,7 @@ const CONTRACT_ABI = [
                 { name: 'mintFeeBps', type: 'uint256' },
                 { name: 'burnFeeBps', type: 'uint256' },
                 { name: 'moneroAddress', type: 'string' },
+                { name: 'privateViewKey', type: 'bytes32' },
                 { name: 'active', type: 'bool' },
                 { name: 'registered', type: 'bool' }
             ],
@@ -105,6 +106,15 @@ const CONTRACT_ABI = [
     },
     {
         inputs: [
+            { name: 'intentId', type: 'bytes32' }
+        ],
+        name: 'claimExpiredIntent',
+        outputs: [],
+        stateMutability: 'nonpayable',
+        type: 'function',
+    },
+    {
+        inputs: [
             { name: 'lp', type: 'address' },
             { name: 'amount', type: 'uint256' },
             { name: 'xmrAddress', type: 'string' }
@@ -118,7 +128,9 @@ const CONTRACT_ABI = [
         inputs: [
             { name: 'mintFeeBps', type: 'uint256' },
             { name: 'burnFeeBps', type: 'uint256' },
+            { name: 'intentDepositBps', type: 'uint256' },
             { name: 'moneroAddress', type: 'string' },
+            { name: 'privateViewKey', type: 'bytes32' },
             { name: 'active', type: 'bool' }
         ],
         name: 'registerLP',
@@ -262,6 +274,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Setup event listeners
     setupEventListeners();
     
+    // Initialize public client for reading contract data (doesn't require wallet)
+    state.publicClient = createPublicClient({
+        chain: unichainSepolia,
+        transport: http(CONFIG.RPC_URL)
+    });
+    
     // Check if wallet is already connected
     const provider = getEthereumProvider();
     if (provider) {
@@ -340,6 +358,7 @@ function setupEventListeners() {
     
     // Mint tab
     document.getElementById('lpSelect').addEventListener('change', handleLPSelection);
+    document.getElementById('mintAmount').addEventListener('input', updateIntentDepositDisplay);
     document.getElementById('createIntentBtn').addEventListener('click', createMintIntent);
     const copyBtn = document.getElementById('copyAddressBtn');
     if (copyBtn) copyBtn.addEventListener('click', copyMoneroAddress);
@@ -352,6 +371,8 @@ function setupEventListeners() {
     // LP tab
     document.getElementById('registerLpBtn').addEventListener('click', registerAsLP);
     document.getElementById('depositCollateralBtn').addEventListener('click', depositCollateral);
+    const updateLpBtn = document.getElementById('updateLpBtn');
+    if (updateLpBtn) updateLpBtn.addEventListener('click', updateLPSettings);
     
     // Listen for account changes
     const provider = getEthereumProvider();
@@ -524,24 +545,8 @@ async function loadInitialData() {
     lpSelect.innerHTML = '<option value="">Loading LPs...</option>';
     burnLpSelect.innerHTML = '<option value="">Loading LPs...</option>';
     
-    if (!state.publicClient) return;
-    
-    try {
-        // Fetch minimum intent deposit
-        const minDeposit = await state.publicClient.readContract({
-            address: CONFIG.CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'MIN_INTENT_DEPOSIT'
-        });
-        const depositEth = formatEther(minDeposit);
-        document.getElementById('intentDepositDisplay').textContent = depositEth;
-        // Store it for later use
-        state.minIntentDeposit = minDeposit;
-    } catch (error) {
-        console.error('Error loading min deposit:', error);
-        document.getElementById('intentDepositDisplay').textContent = '0.001';
-        state.minIntentDeposit = parseEther('0.001');
-    }
+    // Note: Intent deposit is now LP-specific and will be calculated when user selects an LP
+    document.getElementById('intentDepositDisplay').textContent = 'Select LP first';
     
     try {
         // Fetch active LPs from contract
@@ -557,9 +562,8 @@ async function loadInitialData() {
         burnLpSelect.innerHTML = '<option value="">Select a liquidity provider...</option>';
         
         if (addresses.length === 0) {
-            const option = '<option value="" disabled>No active LPs available</option>';
-            lpSelect.innerHTML += option;
-            burnLpSelect.innerHTML += option;
+            lpSelect.innerHTML = '<option value="" disabled>No active LPs available - Register as LP to get started</option>';
+            burnLpSelect.innerHTML = '<option value="" disabled>No active LPs available</option>';
         } else {
             for (let i = 0; i < addresses.length; i++) {
                 const capacity = formatUnits(capacities[i], 12);
@@ -620,8 +624,128 @@ async function loadUserData() {
         // Load LP info if user is an LP
         await loadLPInfo();
         
+        // Load active mint intents
+        await loadMintIntents();
+        
     } catch (error) {
         console.error('Error loading user data:', error);
+    }
+}
+
+async function loadMintIntents() {
+    if (!state.publicClient || !state.userAddress) return;
+    
+    try {
+        const result = await state.publicClient.readContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'getUserMintIntents',
+            args: [state.userAddress]
+        });
+        
+        const [intentIds, lps, amounts, deposits, timestamps] = result;
+        
+        // Clear existing intents display
+        const intentsList = document.getElementById('activeIntentsList');
+        if (!intentsList) return;
+        
+        if (intentIds.length === 0) {
+            intentsList.innerHTML = '<p class="empty-state">No active mint intents</p>';
+            return;
+        }
+        
+        intentsList.innerHTML = '';
+        
+        for (let i = 0; i < intentIds.length; i++) {
+            const intentId = intentIds[i];
+            const lp = lps[i];
+            const amount = amounts[i];
+            const deposit = deposits[i];
+            const timestamp = timestamps[i];
+            
+            const createdTime = Number(timestamp) * 1000;
+            const expirationTime = createdTime + (2 * 60 * 60 * 1000); // 2 hours
+            const now = Date.now();
+            const canCancel = now > expirationTime;
+            const timeUntilExpiry = expirationTime - now;
+            
+            // Fetch LP's Monero address
+            let moneroAddress = 'Loading...';
+            try {
+                const lpInfoResult = await state.publicClient.readContract({
+                    address: CONFIG.CONTRACT_ADDRESS,
+                    abi: [{
+                        inputs: [{ name: 'lp', type: 'address' }],
+                        name: 'lpInfo',
+                        outputs: [
+                            { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, 
+                            { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, { name: 'moneroAddress', type: 'string' }
+                        ],
+                        stateMutability: 'view',
+                        type: 'function'
+                    }],
+                    functionName: 'lpInfo',
+                    args: [lp]
+                });
+                moneroAddress = lpInfoResult[5] || 'N/A';
+            } catch (e) {
+                console.error('Error fetching LP Monero address:', e);
+            }
+            
+            const intentDiv = document.createElement('div');
+            intentDiv.className = 'intent-item card';
+            
+            if (canCancel) {
+                intentDiv.innerHTML = `
+                    <div style="padding: 1rem; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 8px;">
+                        <div style="font-weight: 600; color: #856404; margin-bottom: 0.5rem;">⚠️ Intent Expired</div>
+                        <div style="font-size: 0.9em; color: #856404;">This intent has expired. The LP can now claim your deposit.</div>
+                        <div style="font-size: 0.85em; color: #856404; margin-top: 0.5rem;">Intent ID: ${intentId.slice(0, 16)}...</div>
+                    </div>
+                `;
+            } else {
+                const hoursLeft = Math.floor(timeUntilExpiry / (60 * 60 * 1000));
+                const minutesLeft = Math.floor((timeUntilExpiry % (60 * 60 * 1000)) / (60 * 1000));
+                const xmrAmount = formatUnits(amount, 12);
+                
+                intentDiv.innerHTML = `
+                    <div style="padding: 1.5rem; background: #f8f9fa; border: 2px solid #4CAF50; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                        <div style="font-size: 1.1em; font-weight: 600; margin-bottom: 1rem; color: #2c3e50;">💸 Active Mint Intent</div>
+                        
+                        <div style="background: white; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #e0e0e0;">
+                            <div style="font-size: 0.9em; color: #4CAF50; font-weight: 600; margin-bottom: 0.5rem;">STEP 1: Send XMR</div>
+                            <div style="font-weight: 600; font-size: 1.2em; margin-bottom: 0.5rem; color: #2c3e50;">${xmrAmount} XMR</div>
+                            <div style="font-size: 0.85em; color: #666; margin-bottom: 0.5rem;">to this Monero address:</div>
+                            <div style="background: #f5f5f5; padding: 0.75rem; border-radius: 6px; font-family: monospace; font-size: 0.75em; word-break: break-all; margin-bottom: 0.5rem; border: 1px solid #ddd; color: #333;">${moneroAddress}</div>
+                            <button onclick="navigator.clipboard.writeText('${moneroAddress}'); window.showToast('Address copied!', 'success');" style="background: #4CAF50; border: none; color: white; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85em; font-weight: 500;">📋 Copy Address</button>
+                        </div>
+                        
+                        <div style="background: white; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid #e0e0e0;">
+                            <div style="font-size: 0.9em; color: #2196F3; font-weight: 600; margin-bottom: 0.5rem;">STEP 2: Generate Proof</div>
+                            <div style="font-size: 0.85em; color: #666;">After sending, scroll down to "Generate Proof & Complete Mint" section and provide your transaction details.</div>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 1px solid #e0e0e0;">
+                            <div>
+                                <div style="font-size: 0.8em; color: #666;">⏰ Time remaining:</div>
+                                <div style="font-weight: 600; color: #ff9800;">${hoursLeft}h ${minutesLeft}m</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 0.8em; color: #666;">Deposit at risk:</div>
+                                <div style="font-weight: 600; color: #f44336;">${formatEther(deposit)} ETH</div>
+                            </div>
+                        </div>
+                        
+                        <div style="font-size: 0.75em; color: #999; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e0e0e0;">Intent ID: ${intentId.slice(0, 20)}...</div>
+                    </div>
+                `;
+            }
+            
+            intentsList.appendChild(intentDiv);
+        }
+        
+    } catch (error) {
+        console.error('Error loading mint intents:', error);
     }
 }
 
@@ -629,20 +753,133 @@ async function loadLPInfo() {
     if (!state.publicClient || !state.userAddress) return;
     
     try {
-        const lpInfo = await state.publicClient.readContract({
-            address: CONFIG.CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'lpInfo',
-            args: [state.userAddress]
-        });
+        // Read LP info fields individually to avoid viem decoding issues
+        const [collateralAmount, backedAmount, mintFeeBps, burnFeeBps, moneroAddress, privateViewKey, active, registered] = await Promise.all([
+            state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: [{
+                    inputs: [{ name: 'lp', type: 'address' }],
+                    name: 'lpInfo',
+                    outputs: [{ name: 'collateralAmount', type: 'uint256' }],
+                    stateMutability: 'view',
+                    type: 'function'
+                }],
+                functionName: 'lpInfo',
+                args: [state.userAddress]
+            }).then(result => result[0] || 0n).catch(() => 0n),
+            
+            state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: [{
+                    inputs: [{ name: 'lp', type: 'address' }],
+                    name: 'lpInfo',
+                    outputs: [{ name: '', type: 'uint256' }, { name: 'backedAmount', type: 'uint256' }],
+                    stateMutability: 'view',
+                    type: 'function'
+                }],
+                functionName: 'lpInfo',
+                args: [state.userAddress]
+            }).then(result => result[1] || 0n).catch(() => 0n),
+            
+            state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: [{
+                    inputs: [{ name: 'lp', type: 'address' }],
+                    name: 'lpInfo',
+                    outputs: [{ name: '', type: 'uint256' }, { name: '', type: 'uint256' }, { name: 'mintFeeBps', type: 'uint256' }],
+                    stateMutability: 'view',
+                    type: 'function'
+                }],
+                functionName: 'lpInfo',
+                args: [state.userAddress]
+            }).then(result => result[2] || 0n).catch(() => 0n),
+            
+            state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: [{
+                    inputs: [{ name: 'lp', type: 'address' }],
+                    name: 'lpInfo',
+                    outputs: [{ name: '', type: 'uint256' }, { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, { name: 'burnFeeBps', type: 'uint256' }],
+                    stateMutability: 'view',
+                    type: 'function'
+                }],
+                functionName: 'lpInfo',
+                args: [state.userAddress]
+            }).then(result => result[3] || 0n).catch(() => 0n),
+            
+            // Skip moneroAddress for now - it's causing the decoding issue
+            Promise.resolve(''),
+            Promise.resolve('0x0000000000000000000000000000000000000000000000000000000000000000'),
+            
+            state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: [{
+                    inputs: [{ name: 'lp', type: 'address' }],
+                    name: 'lpInfo',
+                    outputs: [
+                        { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, 
+                        { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, { name: '', type: 'string' }, 
+                        { name: '', type: 'bytes32' }, { name: 'active', type: 'bool' }
+                    ],
+                    stateMutability: 'view',
+                    type: 'function'
+                }],
+                functionName: 'lpInfo',
+                args: [state.userAddress]
+            }).then(result => result[7] || false).catch(() => false),
+            
+            state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: [{
+                    inputs: [{ name: 'lp', type: 'address' }],
+                    name: 'lpInfo',
+                    outputs: [
+                        { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, 
+                        { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, { name: '', type: 'string' }, 
+                        { name: '', type: 'bytes32' }, { name: '', type: 'bool' }, { name: 'registered', type: 'bool' }
+                    ],
+                    stateMutability: 'view',
+                    type: 'function'
+                }],
+                functionName: 'lpInfo',
+                args: [state.userAddress]
+            }).then(result => result[8] || false).catch(() => false)
+        ]);
         
-        if (lpInfo.collateralAmount > 0n) {
-            // User is an LP
-            const collateral = formatEther(lpInfo.collateralAmount);
-            const backed = formatUnits(lpInfo.backedAmount, 12);
+        console.log('LP registered:', registered);
+        const isLP = registered;
+        
+        // Show/hide appropriate view
+        const nonLpView = document.getElementById('nonLpView');
+        const existingLpView = document.getElementById('existingLpView');
+        
+        if (isLP) {
+            // User is an LP - show management view
+            nonLpView.style.display = 'none';
+            existingLpView.style.display = 'block';
+            document.getElementById('lpTabBtn').textContent = 'Manage LP';
+            
+            // Variables already extracted from individual contract calls
+            
+            // Update stats
+            const collateral = formatEther(collateralAmount);
+            const backed = formatUnits(backedAmount, 12);
             
             document.getElementById('lpCollateral').textContent = parseFloat(collateral).toFixed(4) + ' wstETH';
             document.getElementById('lpBacked').textContent = parseFloat(backed).toFixed(4) + ' XMR';
+            document.getElementById('lpStatus').textContent = active ? 'Active' : 'Inactive';
+            
+            // Update current configuration
+            document.getElementById('lpCurrentMintFee').textContent = (Number(mintFeeBps) / 100).toFixed(2) + '%';
+            document.getElementById('lpCurrentBurnFee').textContent = (Number(burnFeeBps) / 100).toFixed(2) + '%';
+            document.getElementById('lpCurrentMoneroAddress').textContent = moneroAddress;
+            
+            // Set checkbox state
+            document.getElementById('lpActiveToggle').checked = active;
+            
+            // Set placeholders with current values
+            document.getElementById('lpUpdateMintFee').placeholder = `Current: ${mintFeeBps} bps`;
+            document.getElementById('lpUpdateBurnFee').placeholder = `Current: ${burnFeeBps} bps`;
             
             // Load ratio
             try {
@@ -652,15 +889,38 @@ async function loadLPInfo() {
                     functionName: 'getLPRatio',
                     args: [state.userAddress]
                 });
-                document.getElementById('lpYourRatio').textContent = ratio.toString() + '%';
+                
+                // Check if ratio is max uint256 (no backing yet)
+                const maxUint256 = 115792089237316195423570985008687907853269984665640564039457584007913129639935n;
+                if (ratio >= maxUint256 || backedAmount === 0n) {
+                    document.getElementById('lpYourRatio').textContent = '∞ (No backing yet)';
+                } else {
+                    document.getElementById('lpYourRatio').textContent = ratio.toString() + '%';
+                }
             } catch (e) {
                 console.log('Could not load LP ratio:', e.message);
                 document.getElementById('lpYourRatio').textContent = 'N/A';
             }
+        } else {
+            // User is not an LP - show registration view
+            nonLpView.style.display = 'block';
+            existingLpView.style.display = 'none';
+            document.getElementById('lpTabBtn').textContent = 'Become LP';
         }
     } catch (error) {
-        // Silently fail if user is not an LP or contract has issues
-        console.log('User is not an LP or LP info unavailable');
+        // User is not an LP or contract has issues - show registration view
+        console.error('Error loading LP info:', error);
+        
+        // Check if it's a decoding error (user not registered)
+        if (error.message.includes('Position') && error.message.includes('out of bounds')) {
+            console.log('User is not registered as LP on this contract');
+        } else {
+            console.error('Error message:', error.message);
+        }
+        
+        document.getElementById('nonLpView').style.display = 'block';
+        document.getElementById('existingLpView').style.display = 'none';
+        document.getElementById('lpTabBtn').textContent = 'Become LP';
     }
 }
 
@@ -722,6 +982,34 @@ async function loadLPDetails(lpAddress) {
             document.getElementById('lpCapacity').textContent = 'N/A';
         }
         
+        // Load LP's intent deposit requirement (read just index 4)
+        try {
+            const intentDepositBps = await state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: [{
+                    inputs: [{ name: 'lp', type: 'address' }],
+                    name: 'lpInfo',
+                    outputs: [
+                        { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, { name: '', type: 'uint256' }, 
+                        { name: '', type: 'uint256' }, { name: 'intentDepositBps', type: 'uint256' }
+                    ],
+                    stateMutability: 'view',
+                    type: 'function'
+                }],
+                functionName: 'lpInfo',
+                args: [lpAddress]
+            }).then(result => result[4] || 0n);
+            
+            state.selectedLPIntentDepositBps = intentDepositBps;
+            console.log('LP intent deposit bps:', intentDepositBps);
+            
+            // Update deposit display
+            updateIntentDepositDisplay();
+        } catch (e) {
+            console.error('Error loading LP intent deposit:', e);
+            state.selectedLPIntentDepositBps = 0n;
+        }
+        
         // Load ratio
         try {
             const ratio = await state.publicClient.readContract({
@@ -747,6 +1035,31 @@ async function loadLPDetails(lpAddress) {
     }
 }
 
+function updateIntentDepositDisplay() {
+    const mintAmount = document.getElementById('mintAmount').value;
+    const depositDisplay = document.getElementById('intentDepositDisplay');
+    
+    if (!mintAmount || !state.selectedLPIntentDepositBps) {
+        depositDisplay.textContent = 'Enter amount';
+        return;
+    }
+    
+    try {
+        // Use same calculation as createMintIntent: XMR = $330, ETH = $2500
+        const xmrAmount = parseFloat(mintAmount);
+        const depositPercent = Number(state.selectedLPIntentDepositBps) / 100; // Convert bps to percent
+        
+        // Calculate: (xmrAmount * 330 / 2500) * (intentDepositBps / 10000) * 5 (buffer)
+        const xmrValueEth = (xmrAmount * 330) / 2500;
+        const depositEth = xmrValueEth * (depositPercent / 100);
+        const depositWithBuffer = depositEth * 5; // 5x buffer to match createMintIntent
+        
+        depositDisplay.textContent = `~${depositWithBuffer.toFixed(6)} ETH (${depositPercent}% + 5x safety buffer)`;
+    } catch (e) {
+        depositDisplay.textContent = 'Calculating...';
+    }
+}
+
 async function createMintIntent() {
     if (!state.isConnected) {
         showToast('Please connect your wallet first', 'warning');
@@ -761,8 +1074,8 @@ async function createMintIntent() {
         return;
     }
     
-    if (!state.minIntentDeposit) {
-        showToast('Loading contract data, please wait...', 'warning');
+    if (!state.selectedLPIntentDepositBps) {
+        showToast('Please select an LP first', 'warning');
         return;
     }
     
@@ -771,7 +1084,19 @@ async function createMintIntent() {
         
         // Convert amount to piconero
         const amountPiconero = parseUnits(amount, 12);
-        const depositWei = state.minIntentDeposit;
+        
+        // Calculate required deposit based on LP's setting
+        // Using fixed prices: XMR = $330, ETH = $2500
+        // amountPiconero is in piconero (1 XMR = 1e12 piconero)
+        // We need result in wei (1 ETH = 1e18 wei)
+        // Formula: (xmrInPiconero / 1e12) * 330 / 2500 * intentDepositBps / 10000 * 1e18
+        // = xmrInPiconero * 330 * intentDepositBps * 1e18 / (1e12 * 2500 * 10000)
+        // = xmrInPiconero * 330 * intentDepositBps * 1e6 / 25000000
+        
+        let depositWei = (amountPiconero * 330n * state.selectedLPIntentDepositBps * 1000000n) / 25000000n;
+        // Add 5x buffer to account for price differences with oracle (will be refunded if excess)
+        depositWei = depositWei * 5n;
+        console.log('Deposit required (with 5x buffer for safety):', formatEther(depositWei), 'ETH');
         
         const hash = await state.walletClient.writeContract({
             address: CONFIG.CONTRACT_ADDRESS,
@@ -852,6 +1177,9 @@ function copyMoneroAddress() {
     showToast('Address copied to clipboard!', 'success');
 }
 
+// Note: Users cannot cancel mint intents. They have 2 hours to complete the mint.
+// After 2 hours, the LP can claim the deposit using claimExpiredIntent.
+
 // ============================================
 // Burn Functions
 // ============================================
@@ -923,10 +1251,12 @@ async function registerAsLP() {
     
     const mintFee = document.getElementById('lpMintFeeInput').value;
     const burnFee = document.getElementById('lpBurnFeeInput').value;
+    const intentDeposit = document.getElementById('lpIntentDepositInput').value;
     const moneroAddress = document.getElementById('lpMoneroAddress').value;
+    const privateViewKey = document.getElementById('lpPrivateViewKey').value;
     const active = true; // Always active when registering
     
-    if (!mintFee || !burnFee || !moneroAddress) {
+    if (!mintFee || !burnFee || !intentDeposit || !moneroAddress || !privateViewKey) {
         showToast('Please fill in all fields', 'warning');
         return;
     }
@@ -937,6 +1267,16 @@ async function registerAsLP() {
         return;
     }
     
+    // Validate private view key format (should be 64 hex chars or 66 with 0x prefix)
+    let viewKeyHex = privateViewKey.trim();
+    if (!viewKeyHex.startsWith('0x')) {
+        viewKeyHex = '0x' + viewKeyHex;
+    }
+    if (!/^0x[0-9a-fA-F]{64}$/.test(viewKeyHex)) {
+        showToast('Invalid private view key format (must be 32 bytes / 64 hex characters)', 'error');
+        return;
+    }
+    
     try {
         showLoading('Registering as LP...');
         
@@ -944,22 +1284,36 @@ async function registerAsLP() {
             address: CONFIG.CONTRACT_ADDRESS,
             abi: CONTRACT_ABI,
             functionName: 'registerLP',
-            args: [BigInt(mintFee), BigInt(burnFee), moneroAddress, active],
+            args: [BigInt(mintFee), BigInt(burnFee), BigInt(intentDeposit), moneroAddress, viewKeyHex, active],
             gas: 500000n
         });
         
         showLoading('Waiting for confirmation...');
-        await state.publicClient.waitForTransactionReceipt({ 
-            hash,
-            pollingInterval: 2000,
-            timeout: 120000
-        });
+        try {
+            await state.publicClient.waitForTransactionReceipt({ 
+                hash,
+                pollingInterval: 3000,
+                timeout: 60000
+            });
+            
+            hideLoading();
+            showToast('Successfully registered as LP!', 'success');
+        } catch (waitError) {
+            // If waiting fails but tx was submitted, still consider it successful
+            if (waitError.message.includes('block is out of range') || waitError.message.includes('timeout')) {
+                console.log('Transaction submitted but confirmation timed out. Hash:', hash);
+                hideLoading();
+                showToast(`Transaction submitted! Hash: ${hash.slice(0, 10)}... Check explorer for confirmation.`, 'success');
+            } else {
+                throw waitError;
+            }
+        }
         
-        hideLoading();
-        showToast('Successfully registered as LP!', 'success');
-        
-        // Reload LP info
-        await loadLPInfo();
+        // Reload LP info and LP list after a delay
+        setTimeout(() => {
+            loadLPInfo();
+            loadInitialData(); // Reload LP dropdown
+        }, 5000);
         
     } catch (error) {
         console.error('Error registering as LP:', error);
@@ -1003,14 +1357,99 @@ async function depositCollateral() {
         
         hideLoading();
         showToast('Collateral deposited successfully!', 'success');
+        addActivity('Collateral Deposited', `${amount} ETH`, 'Just now');
         
-        // Reload LP info
+        // Reload LP info and dropdown (capacity changed)
         await loadLPInfo();
+        await loadInitialData();
         
     } catch (error) {
         console.error('Error depositing collateral:', error);
         hideLoading();
-        showToast('Failed to deposit collateral: ' + error.message, 'error');
+        
+        // Check if it's the wstETH wrapping issue
+        if (error.message.includes('execution reverted') || error.message.includes('wstETH wrap failed')) {
+            showToast('⚠️ ETH to wstETH wrapping failed. The wstETH contract on Unichain Sepolia may not support direct ETH deposits. Please contact the team for assistance.', 'error');
+        } else {
+            showToast('Failed to deposit collateral: ' + error.message, 'error');
+        }
+    }
+}
+
+async function updateLPSettings() {
+    if (!state.isConnected) {
+        showToast('Please connect your wallet first', 'warning');
+        return;
+    }
+    
+    try {
+        // Get current LP info first
+        const currentLpInfo = await state.publicClient.readContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'lpInfo',
+            args: [state.userAddress]
+        });
+        
+        if (!currentLpInfo.registered) {
+            showToast('You are not registered as an LP', 'error');
+            return;
+        }
+        
+        // Get new values or use current ones
+        const newMintFee = document.getElementById('lpUpdateMintFee').value || currentLpInfo.mintFeeBps.toString();
+        const newBurnFee = document.getElementById('lpUpdateBurnFee').value || currentLpInfo.burnFeeBps.toString();
+        const newMoneroAddress = document.getElementById('lpUpdateMoneroAddress').value || currentLpInfo.moneroAddress;
+        const newPrivateViewKey = document.getElementById('lpUpdatePrivateViewKey').value || currentLpInfo.privateViewKey;
+        const newActive = document.getElementById('lpActiveToggle').checked;
+        
+        // Validate private view key format if provided
+        let viewKeyHex = newPrivateViewKey;
+        if (typeof viewKeyHex === 'string') {
+            viewKeyHex = viewKeyHex.trim();
+            if (!viewKeyHex.startsWith('0x')) {
+                viewKeyHex = '0x' + viewKeyHex;
+            }
+            if (!/^0x[0-9a-fA-F]{64}$/.test(viewKeyHex)) {
+                showToast('Invalid private view key format (must be 32 bytes / 64 hex characters)', 'error');
+                return;
+            }
+        }
+        
+        showLoading('Updating LP settings...');
+        
+        const hash = await state.walletClient.writeContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'registerLP',
+            args: [BigInt(newMintFee), BigInt(newBurnFee), newMoneroAddress, viewKeyHex, newActive],
+            gas: 500000n
+        });
+        
+        showLoading('Waiting for confirmation...');
+        await state.publicClient.waitForTransactionReceipt({ 
+            hash,
+            pollingInterval: 2000,
+            timeout: 120000
+        });
+        
+        hideLoading();
+        showToast('LP settings updated successfully!', 'success');
+        
+        // Clear update fields
+        document.getElementById('lpUpdateMintFee').value = '';
+        document.getElementById('lpUpdateBurnFee').value = '';
+        document.getElementById('lpUpdateMoneroAddress').value = '';
+        document.getElementById('lpUpdatePrivateViewKey').value = '';
+        
+        // Reload LP info and dropdown
+        await loadLPInfo();
+        await loadInitialData();
+        
+    } catch (error) {
+        console.error('Error updating LP settings:', error);
+        hideLoading();
+        showToast('Failed to update LP settings: ' + error.message, 'error');
     }
 }
 
@@ -1067,6 +1506,9 @@ function showToast(message, type = 'info') {
         setTimeout(() => toast.remove(), 400);
     }, 5000);
 }
+
+// Expose for inline onclick handlers
+window.showToast = showToast;
 
 function formatAddress(address) {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
