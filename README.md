@@ -13,9 +13,11 @@ A privacy-preserving bridge for Monero (XMR) to Ethereum using zero-knowledge pr
 
 - ✅ **End-to-End Minting**: Full flow from Monero TX → ZK proof → Token mint working!
 - ✅ **Privacy-Preserving**: ZK proofs verify Monero ownership without revealing transaction details
+- ✅ **Privacy Relayer System**: ERC-4337 style relayers for anonymous minting to fresh addresses
 - ✅ **LP-Based Model**: Decentralized liquidity providers back wrapped tokens
 - ✅ **Yield-Bearing Collateral**: LPs use wstETH for automatic yield generation
 - ✅ **PLONK Proofs**: Efficient ZK-SNARKs with ~1,167 constraints
+- ✅ **Amount Verification**: Cryptographic amount decryption using LP's private view key
 - ⚠️ **In Progress**: Merkle proof verification, full ZK verification (temporarily disabled for MVP)
 - ⚠️ **In Progress**: Pyth Network oracle integration for XMR/ETH prices
 
@@ -49,8 +51,15 @@ hookedMonero/
 │
 ├── scripts/                    # Deployment & management scripts
 │   ├── deploy.js              # Main deployment script
+│   ├── deploy-relayer.js      # Deploy privacy relayer
 │   ├── verify.js              # Contract verification
 │   ├── verify-args.js         # Verification arguments
+│   ├── relayer/               # Privacy relayer system
+│   │   ├── signMintIntent.js  # EIP-712 intent signing
+│   │   ├── relayerService.js  # Background relayer service
+│   │   ├── privateMint.js     # User-facing private mint
+│   │   ├── registerRelayer.js # Register as relayer
+│   │   └── startRelayer.js    # Start relayer daemon
 │   └── oracle/                # Oracle management scripts
 │       ├── setup.sh           # Configure oracle
 │       └── run.sh             # Run oracle service
@@ -225,6 +234,7 @@ npm run verify
 
 - [Circuit Documentation](circuit/README.md) - Circom circuit details
 - [Contract Documentation](contracts/README.md) - Solidity contract details
+- [Privacy Relayer System](RELAYER_README.md) - ERC-4337 style privacy relayers
 - [Pyth Network Docs](https://docs.pyth.network/) - Oracle integration
 - [PLONK Paper](https://eprint.iacr.org/2019/953) - ZK proof system
 

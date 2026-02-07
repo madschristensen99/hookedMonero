@@ -68,13 +68,29 @@ struct Config {
 
 impl Config {
     fn from_env() -> Result<Self> {
+        // Read bridge address from deployment file
+        let deployment_path = "../deployments/unichain_testnet_latest.json";
+        let bridge_address = if std::path::Path::new(deployment_path).exists() {
+            let deployment_json = std::fs::read_to_string(deployment_path)
+                .context("Failed to read deployment file")?;
+            let deployment: serde_json::Value = serde_json::from_str(&deployment_json)
+                .context("Failed to parse deployment JSON")?;
+            let addr_str = deployment["contracts"]["WrappedMonero"]
+                .as_str()
+                .context("WrappedMonero address not found in deployment file")?;
+            addr_str.parse().context("Invalid WrappedMonero address in deployment file")?
+        } else {
+            // Fallback to env var if deployment file doesn't exist
+            env::var("BRIDGE_ADDRESS")
+                .context("BRIDGE_ADDRESS not set and no deployment file found")?
+                .parse()
+                .context("Invalid BRIDGE_ADDRESS")?
+        };
+
         Ok(Self {
             oracle_private_key: env::var("PRIVATE_KEY")
                 .context("PRIVATE_KEY not set (used for both deployment and oracle)")?,
-            bridge_address: env::var("BRIDGE_ADDRESS")
-                .context("BRIDGE_ADDRESS not set")?
-                .parse()
-                .context("Invalid BRIDGE_ADDRESS")?,
+            bridge_address,
             unichain_rpc_url: env::var("UNICHAIN_RPC_URL")
                 .unwrap_or_else(|_| "https://mainnet.unichain.org".to_string()),
             monero_rpc_url: env::var("MONERO_RPC_URL")
