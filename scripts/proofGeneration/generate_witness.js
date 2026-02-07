@@ -66,6 +66,8 @@ function computeAmountKey(H_s_scalar_bits) {
         H_s_bytes.push(0);
     }
     
+    console.log(`[DEBUG] H_s bytes for amount key: ${Buffer.from(H_s_bytes).toString('hex').slice(0, 32)}...`);
+    
     const input = Buffer.concat([
         amountPrefix,
         Buffer.from(H_s_bytes)
