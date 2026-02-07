@@ -1,5 +1,0 @@
-v4-core/=node_modules/@uniswap/v4-core/
-v4-periphery/=node_modules/@uniswap/v4-periphery/
-@uniswap/v4-core/=node_modules/@uniswap/v4-core/
-@uniswap/v4-periphery/=node_modules/@uniswap/v4-periphery/
-@openzeppelin/=node_modules/@openzeppelin/
