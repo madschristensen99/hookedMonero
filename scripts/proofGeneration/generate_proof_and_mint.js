@@ -8,6 +8,7 @@ const bs58 = require("bs58");
 const ed = require('@noble/ed25519');
 const { CURVE } = require("../utils/ed25519_utils.js");
 const { computeEd25519Operations } = require('./generate_dleq.js');
+const { decryptMoneroAmount } = require('./compute_monero_keys.js');
 
 async function main() {
     console.log("🎯 Generating REAL Proof and Minting zeroXMR\n");
@@ -24,11 +25,33 @@ async function main() {
     const BLOCK_HEIGHT = txData.blockHeight;
     const OUTPUT_INDEX = txData.outputIndex;
     const EXPECTED_AMOUNT = txData.expectedAmount;
+    const LP_PRIVATE_VIEW_KEY = txData.lpPrivateViewKey; // LP's Monero private view key
     
-    console.log("\n⏳ Step 1: Waiting for oracle to post block", BLOCK_HEIGHT, "...");
+    console.log("\n⏳ Step 0: Loading LP info and validating...");
     const hre = require('hardhat');
     const deployment = JSON.parse(fs.readFileSync('deployments/unichain_testnet_mock_latest.json'));
     const bridge = await hre.ethers.getContractAt('WrappedMonero', deployment.contracts.WrappedMonero);
+    
+    // Get signer (LP)
+    const [signer] = await hre.ethers.getSigners();
+    console.log("   LP Address:", signer.address);
+    
+    // Fetch LP's private view key from contract (or use from txData)
+    let privateViewKey = LP_PRIVATE_VIEW_KEY;
+    if (!privateViewKey) {
+        console.log("   ⚠️  No private view key in transaction_data.json");
+        console.log("   Fetching from contract...");
+        const lpInfo = await bridge.lpInfo(signer.address);
+        privateViewKey = lpInfo.privateViewKey;
+        if (privateViewKey === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+            throw new Error('LP has not registered with a private view key. Please call registerLP first.');
+        }
+        console.log("   ✅ Private view key loaded from contract");
+    } else {
+        console.log("   ✅ Private view key loaded from transaction data");
+    }
+    
+    console.log("\n⏳ Step 1: Waiting for oracle to post block", BLOCK_HEIGHT, "...");
     
     // Wait for block to be posted (max 5 minutes)
     let blockExists = false;
@@ -112,64 +135,29 @@ async function main() {
     console.log("   ECDH Amount:", ecdhAmount);
     console.log("   Commitment:", commitment);
 
-    // Step 3: For the proof, we actually just need to provide r, v, and H_s
-    // The circuit will verify: P = H_s·G + B
-    // We can compute H_s from the output key P and spend key B: H_s = (P - B) / G
-    // But that's complex. Instead, let's use a simpler approach:
-    // Since we have r and the output key P, we can work backwards
-    console.log("\n🔐 Step 3: Computing H_s from transaction data...");
-    const { keccak256 } = require('js-sha3');
-    
-    // H_s computed using proper Monero Ed25519 derivation
-    // Formula: H_s = H("derivation" || R || A || output_index) where R = r*G
-    console.log("   ✅ Using proper Monero key derivation");
-    
-    // Extract tx public key R from extra field
+    // Step 3: Extract tx public key R from transaction
+    console.log("\n🔐 Step 3: Extracting transaction public key...");
     const txExtra = txJson.extra;
     // Extra format: [0x01, R (32 bytes), ...]
     const R_bytes = Buffer.from(txExtra.slice(1, 33));
     const R_hex = R_bytes.toString('hex');
     console.log("   TX public key R:", R_hex.slice(0, 16) + "...");
     
-    // For the witness, we need H_s as a scalar
-    // Monero: H_s = H_s("derivation_to_scalar" || 8·r·A || output_index)
-    // Since we can't compute r·A properly, let's derive H_s from P - B
-    // P = H_s·G + B, so we need to solve for H_s
-    // This requires discrete log which is hard, so let's use a different approach
+    // Step 4: Decrypt amount using LP's private view key
+    console.log("\n🔓 Step 4: Decrypting amount with LP private view key...");
+    const decryptionResult = await decryptMoneroAmount({
+        privateViewKey: privateViewKey,
+        txPublicKey: R_hex,
+        outputIndex: OUTPUT_INDEX,
+        ecdhAmount: ecdhAmount
+    });
     
-    // Use H_s computed with formula: H("derivation_to_scalar" || R || A || index)
-    const H_s_hex = '010115e951d418e9478745512c58f6fa779012125e9a26541bc705e9ce6fe60c';
+    const H_s_hex = decryptionResult.H_s;
     const H_s_scalar = BigInt('0x' + H_s_hex);
-    console.log("   ✅ Using H_s from Monero derivation:", H_s_scalar.toString(16).slice(0, 16) + "...");
+    const amount_piconero = decryptionResult.amountPiconero;
     
-    // Step 4: Decrypt the amount
-    console.log("\n🔓 Step 4: Decrypting amount...");
-    
-    // Compute amount key from H_s
-    const H_s_bytes = [];
-    let H_s_temp = H_s_scalar;
-    for (let i = 0; i < 32; i++) {
-        H_s_bytes.push(Number(H_s_temp & 0xFFn));
-        H_s_temp >>= 8n;
-    }
-    
-    const amountKeyInput = Buffer.concat([
-        Buffer.from('amount', 'ascii'),
-        Buffer.from(H_s_bytes)
-    ]);
-    const amountKeyHash = keccak256(amountKeyInput);
-    const amountKey = Buffer.from(amountKeyHash, 'hex').slice(0, 8);
-    console.log("   Amount key:", amountKey.toString('hex'));
-    
-    // Decrypt: v = ecdhAmount XOR amountKey
-    const ecdhBytes = Buffer.from(ecdhAmount, 'hex');
-    const decrypted = Buffer.alloc(8);
-    for (let i = 0; i < 8; i++) {
-        decrypted[i] = ecdhBytes[i] ^ amountKey[i];
-    }
-    const decrypted_amount = decrypted.readBigUInt64LE(0);
-    console.log("   ⚠️  Decrypted amount (may be incorrect):", decrypted_amount.toString(), "piconero (", Number(decrypted_amount) / 1e12, "XMR)");
-    console.log("   ℹ️  Using expected amount instead:", EXPECTED_AMOUNT, "XMR");
+    console.log("   🎉 Amount decryption successful!");
+    console.log("   Amount:", amount_piconero.toString(), "piconero (", decryptionResult.amountXMR, "XMR)");
     
     // Step 5: Compute Ed25519 operations
     console.log("\n🔐 Step 5: Computing Ed25519 operations...");
@@ -191,15 +179,28 @@ async function main() {
     // Step 6: Generate witness
     console.log("\n🔧 Step 6: Generating witness...");
     
-    // Calculate amount in piconero from XMR
-    const amount_piconero_str = String(Math.round(EXPECTED_AMOUNT * 1e12));
+    // Use the properly decrypted amount
+    const amount_piconero_str = amount_piconero.toString();
+    
+    // Convert ECDH amount from little-endian hex bytes to number
+    const ecdhBytes = Buffer.from(ecdhAmount, 'hex');
+    let ecdhAmount_num = 0n;
+    for (let i = 0; i < 8; i++) {
+        ecdhAmount_num |= BigInt(ecdhBytes[i]) << (BigInt(i) * 8n);
+    }
+    
+    console.log("   🔍 Debug witness inputs:");
+    console.log("      v (amount):", amount_piconero_str);
+    console.log("      H_s_scalar:", H_s_scalar.toString(16).padStart(64, '0').slice(0, 32) + "...");
+    console.log("      ecdhAmount (hex):", ecdhAmount);
+    console.log("      ecdhAmount (num):", ecdhAmount_num.toString());
     
     // Use Ed25519 operations results for witness (if available)
     const witnessInput = ed25519Ops ? {
         r: SECRET_KEY_R,
         v: amount_piconero_str,
         H_s_scalar: H_s_scalar.toString(16).padStart(64, '0'),
-        ecdhAmount: '0x' + ecdhAmount,
+        ecdhAmount: ecdhAmount_num.toString(),
         R_x: BigInt(ed25519Ops.ed25519Proof.R_x), // From Ed25519 operations
         S_x: BigInt(ed25519Ops.ed25519Proof.S_x), // From Ed25519 operations
         P_compressed: BigInt(ed25519Ops.ed25519Proof.P.x) // From Ed25519 operations
@@ -207,7 +208,7 @@ async function main() {
         r: SECRET_KEY_R,
         v: amount_piconero_str,
         H_s_scalar: H_s_scalar.toString(16).padStart(64, '0'),
-        ecdhAmount: '0x' + ecdhAmount,
+        ecdhAmount: ecdhAmount_num.toString(),
         R_x: BigInt('0x' + R_hex), // Fallback to raw hex
         S_x: BigInt('0x' + R_hex),
         P_compressed: BigInt('0x' + outputKey)
@@ -259,9 +260,7 @@ async function main() {
     // Step 8: Submit to contract
     console.log("\n🚀 Step 8: Submitting proof to contract...");
     
-    console.log("   Loading signer...");
-    const [signer] = await hre.ethers.getSigners();
-    console.log("   Signer:", signer ? signer.address : "UNDEFINED");
+    console.log("   Using LP signer:", signer.address);
     console.log("   Contract:", deployment.contracts.WrappedMonero);
     
     // Format proof for contract
@@ -350,8 +349,7 @@ async function main() {
     );
     console.log("   💾 Updated proof_debug.json with Ed25519/DLEQ proofs");
     
-    // Use the expected amount from transaction_data.json
-    const amount_piconero = BigInt(amount_piconero_str);
+    // amount_piconero already defined from decryption above
     
     // Create output struct
     const output = {

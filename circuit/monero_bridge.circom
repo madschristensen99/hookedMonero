@@ -116,8 +116,8 @@ template MoneroBridge() {
     }
     
     // Verify decrypted amount matches claimed amount
-    // NOTE: Disabled for subaddress support - amount verification done off-chain
-    // decrypted.out === v;
+    // Now enabled with proper LP private view key support
+    decrypted.out === v;
     
     // ════════════════════════════════════════════════════════════════════════
     // STEP 3: Range Checks

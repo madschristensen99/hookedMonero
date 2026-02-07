@@ -9,7 +9,19 @@ async function main() {
 
   // Load deployment
   const deploymentsDir = path.join(__dirname, "..", "deployments");
-  const latestFile = path.join(deploymentsDir, "unichain_testnet_mock_latest.json");
+  
+  // Find the most recent deployment file
+  const files = fs.readdirSync(deploymentsDir).filter(f => f.startsWith('unichain_testnet_mock_'));
+  if (files.length === 0) {
+    console.error("❌ No deployment file found. Please deploy first:");
+    console.error("   npx hardhat run scripts/deploy-with-mock.js --network unichain_testnet");
+    process.exit(1);
+  }
+  
+  // Sort by timestamp (filename contains timestamp)
+  files.sort();
+  const latestFile = path.join(deploymentsDir, files[files.length - 1]);
+  console.log("Using deployment:", files[files.length - 1]);
   
   if (!fs.existsSync(latestFile)) {
     console.error("❌ No mock deployment file found. Please deploy first:");
@@ -45,16 +57,19 @@ async function main() {
   const mintFeeBps = 50;  // 0.5%
   const burnFeeBps = 50;  // 0.5%
   const moneroAddress = "8BuPi2eetgmHxeqirYnrGMQYMTphDviL88ZkfJTACce95Ta48bmAwd9RKmai5nBA7rShtLadXcKwBT8PSjdyo5P4PgAPT23";
+  // Example private view key (32 bytes) - REPLACE WITH YOUR ACTUAL PRIVATE VIEW KEY
+  const privateViewKey = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   const active = true;
 
   console.log("Configuration:");
   console.log("  Mint Fee:", mintFeeBps / 100, "%");
   console.log("  Burn Fee:", burnFeeBps / 100, "%");
   console.log("  Monero Address:", moneroAddress);
+  console.log("  Private View Key:", privateViewKey.slice(0, 18) + "...");
   console.log("");
 
   try {
-    const tx = await WrappedMonero.registerLP(mintFeeBps, burnFeeBps, moneroAddress, active);
+    const tx = await WrappedMonero.registerLP(mintFeeBps, burnFeeBps, moneroAddress, privateViewKey, active);
     console.log("  TX:", tx.hash);
     await tx.wait();
     console.log("✓ Registered as LP\n");
