@@ -29,6 +29,7 @@ A privacy-preserving bridge for Monero (XMR) to Ethereum using zero-knowledge pr
 |----------|---------|----------|
 | **WrappedMonero (wXMR)** | `0x1aFE6c215A3b7136dA30c405C436f668f3dec4BA` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x1aFE6c215A3b7136dA30c405C436f668f3dec4BA) |
 | **MintRelayer** | `0xbF9Aff472b81D36971b3328f79fA661610fE8675` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0xbF9Aff472b81D36971b3328f79fA661610fE8675) |
+| **PrivacySwapHook** | `0x9CB59aa20ca57b4659007d1612068c81A518c0c0` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x9CB59aa20ca57b4659007d1612068c81A518c0c0) |
 | **PlonkVerifier** | `0x1ed5BfabBd944e5417Eab5c3C1A64173C5eDa93F` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x1ed5BfabBd944e5417Eab5c3C1A64173C5eDa93F) |
 | **Private Mint TX** | - | [View on Uniscan](https://sepolia.uniscan.xyz/tx/0xca7c6e7079d64f0b6ff91ef41a2a18a1a1efd36d4f5ec08908a16571a00f1330) |
 | **Fresh Address (Example)** | `0x6E9f163085EDaF15584F13e9D156FE70b5AEb825` | [View tokens](https://sepolia.uniscan.xyz/address/0x6E9f163085EDaF15584F13e9D156FE70b5AEb825#tokentxns) |

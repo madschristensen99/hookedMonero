@@ -215,14 +215,15 @@ contract MintRelayer is EIP712, ReentrancyGuard {
         
         // Get LP info to calculate fees
         (
-            uint256 collateralAmount,
-            uint256 backedAmount,
+            , // collateralAmount
+            , // backedAmount
             uint256 mintFeeBps,
-            uint256 burnFeeBps,
-            string memory moneroAddress,
-            bytes32 privateViewKey,
-            bool active,
-            bool registered
+            , // burnFeeBps
+            , // intentDepositBps
+            , // moneroAddress
+            , // privateViewKey
+            , // active
+              // registered
         ) = wrappedMonero.lpInfo(intent.lp);
         
         // Calculate net amount after LP fee (LP fee handled by WrappedMonero)
