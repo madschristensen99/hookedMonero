@@ -31,6 +31,46 @@ PLONK verifier contract (auto-generated from circuit compilation).
 
 **Generated from:** `../circuit/monero_bridge.circom`
 
+#### `MintRelayer.sol`
+ERC-4337 style relayer for gasless private minting.
+
+**Purpose:**
+- Enables privacy-preserving mints to fresh addresses
+- Users sign EIP-712 mint intents off-chain
+- Relayers execute mints and pay gas
+- No on-chain link between user and recipient
+
+**Key Features:**
+- EIP-712 structured data signing
+- Relayer registration with stake
+- Intent replay protection
+- Deadline enforcement
+
+**Deployed:** `0xbF9Aff472b81D36971b3328f79fA661610fE8675`
+
+#### `PrivacySwapHook.sol`
+Uniswap v4 hook for private token acquisition.
+
+**Purpose:**
+- Atomic wXMR → any token swaps
+- Complete privacy preservation
+- Works with any token with wXMR liquidity
+
+**Key Features:**
+- Extends Uniswap v4 BaseHook
+- Implements beforeSwap and afterSwap hooks
+- Automatic swap execution after mint
+- Sends tokens to fresh address
+- MEV protection via slippage limits
+
+**Status:** ✅ Deployed at `0x9CB59aa20ca57b4659007d1612068c81A518c0c0`
+
+**Deployment Details:**
+- Deployed via CREATE2 factory for correct address prefix
+- Salt: 3491
+- Factory: `0x5941534Bce9585E3F54138B5F5C810Cf4c9dB1D3`
+- [View on Uniscan](https://sepolia.uniscan.xyz/address/0x9CB59aa20ca57b4659007d1612068c81A518c0c0)
+
 ### Interfaces
 
 #### `interfaces/IPlonkVerifier.sol`
