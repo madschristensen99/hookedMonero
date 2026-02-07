@@ -1,9 +1,0 @@
-{
-  "txHash": "85c7ef44055557d97b89f52d9e76c14b1b1be6527621f4923a0daf80f68fc76e",
-  "secretKeyR": "0xa53402ad93ef1b84b4d2c2672f3e6e2d23038d77327e4519548dd9643c6df305",
-  "recipientAddress": "88J4PFznDQNXWdTzfFggdP955vafWQMSDVpXvgPZCt7pYJWfnuVP9WzjHS9xf16L28iE7uw7LncFUeJuNXB55DP1GdrP6p7",
-  "blockHeight": 3604961,
-  "outputIndex": 1,
-  "expectedAmount": 0.00125,
-  "lpPrivateViewKey": "0x0ca8606d02e81ddd102068ae432e00a2510c07f531df440af886788139c3dd04"
-}
