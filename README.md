@@ -1,7 +1,8 @@
 # 🌉 Hooked Monero
 
-> **🎉 MVP SUCCESS!** First successful mint completed Feb 4, 2026  
-> Transaction: [View on Uniscan](https://sepolia.uniscan.xyz/tx/0x3bb99d293c6127323ed500193989acdd412fa4c0714bb517ac6ff7cf5fcf1e13)
+> **🎉 COMPLETE SUCCESS!** First end-to-end private mint completed Feb 7, 2026  
+> **Private Mint TX**: [View on Uniscan](https://sepolia.uniscan.xyz/tx/0xca7c6e7079d64f0b6ff91ef41a2a18a1a1efd36d4f5ec08908a16571a00f1330)  
+> **Fresh Address**: [View tokens](https://sepolia.uniscan.xyz/address/0x6E9f163085EDaF15584F13e9D156FE70b5AEb825#tokentxns) - Anonymously funded with complete privacy!
 
 A privacy-preserving bridge for Monero (XMR) to Ethereum using zero-knowledge proofs (PLONK).
 
@@ -14,20 +15,23 @@ A privacy-preserving bridge for Monero (XMR) to Ethereum using zero-knowledge pr
 - ✅ **End-to-End Minting**: Full flow from Monero TX → ZK proof → Token mint working!
 - ✅ **Privacy-Preserving**: ZK proofs verify Monero ownership without revealing transaction details
 - ✅ **Privacy Relayer System**: ERC-4337 style relayers for anonymous minting to fresh addresses
+- ✅ **PrivacySwap Hook**: Uniswap v4 hook for atomic wXMR → any token swaps with complete privacy
 - ✅ **LP-Based Model**: Decentralized liquidity providers back wrapped tokens
 - ✅ **Yield-Bearing Collateral**: LPs use wstETH for automatic yield generation
 - ✅ **PLONK Proofs**: Efficient ZK-SNARKs with ~1,167 constraints
 - ✅ **Amount Verification**: Cryptographic amount decryption using LP's private view key
-- ⚠️ **In Progress**: Merkle proof verification, full ZK verification (temporarily disabled for MVP)
+- ✅ **Merkle Proof Verification**: TX and output inclusion proofs verified on-chain
 - ⚠️ **In Progress**: Pyth Network oracle integration for XMR/ETH prices
 
 ## 🚀 Deployed Contracts (Unichain Sepolia Testnet)
 
 | Contract | Address | Explorer |
 |----------|---------|----------|
-| **WrappedMonero (zeroXMR)** | `0x956d362086076b05Cf90CBf2EF30689b1172c9C5` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x956d362086076b05Cf90CBf2EF30689b1172c9C5) |
+| **WrappedMonero (wXMR)** | `0x1aFE6c215A3b7136dA30c405C436f668f3dec4BA` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x1aFE6c215A3b7136dA30c405C436f668f3dec4BA) |
+| **MintRelayer** | `0xbF9Aff472b81D36971b3328f79fA661610fE8675` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0xbF9Aff472b81D36971b3328f79fA661610fE8675) |
 | **PlonkVerifier** | `0x1ed5BfabBd944e5417Eab5c3C1A64173C5eDa93F` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x1ed5BfabBd944e5417Eab5c3C1A64173C5eDa93F) |
-| **First Mint TX** | - | [View on Uniscan](https://sepolia.uniscan.xyz/tx/0x3bb99d293c6127323ed500193989acdd412fa4c0714bb517ac6ff7cf5fcf1e13) |
+| **Private Mint TX** | - | [View on Uniscan](https://sepolia.uniscan.xyz/tx/0xca7c6e7079d64f0b6ff91ef41a2a18a1a1efd36d4f5ec08908a16571a00f1330) |
+| **Fresh Address (Example)** | `0x6E9f163085EDaF15584F13e9D156FE70b5AEb825` | [View tokens](https://sepolia.uniscan.xyz/address/0x6E9f163085EDaF15584F13e9D156FE70b5AEb825#tokentxns) |
 
 **Network**: Unichain Sepolia (Chain ID: 1301)  
 **RPC**: https://sepolia.unichain.org
@@ -234,7 +238,8 @@ npm run verify
 
 - [Circuit Documentation](circuit/README.md) - Circom circuit details
 - [Contract Documentation](contracts/README.md) - Solidity contract details
-- [Privacy Relayer System](RELAYER_README.md) - ERC-4337 style privacy relayers
+- [Privacy Relayer System](RELAYER_README.md) - Gasless private minting with EIP-712 intents
+- [PrivacySwap Hook](PRIVACY_SWAP_README.md) - Private token acquisition via Uniswap v4
 - [Pyth Network Docs](https://docs.pyth.network/) - Oracle integration
 - [PLONK Paper](https://eprint.iacr.org/2019/953) - ZK proof system
 
