@@ -104,9 +104,11 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="intentDeposit">Anti-Griefing Deposit (ETH)</label>
-                            <input type="number" id="intentDeposit" class="input" value="0.001" step="0.0001" min="0.001">
-                            <p class="input-hint">Refundable deposit to prevent spam</p>
+                            <label>Anti-Griefing Deposit</label>
+                            <div class="info-display">
+                                <span id="intentDepositDisplay">Loading...</span> ETH
+                            </div>
+                            <p class="input-hint">Refundable deposit required by the contract (prevents spam)</p>
                         </div>
 
                         <div class="steps-container">
@@ -150,7 +152,34 @@
                                 <p><strong>Send XMR to:</strong></p>
                                 <code id="xmrAddress" class="monero-address"></code>
                                 <button class="btn btn-secondary btn-small" id="copyAddressBtn">Copy Address</button>
-                                <p class="mt-2">After sending, you'll need to generate a ZK proof and complete the mint.</p>
+                            </div>
+                            
+                            <div class="card mt-3">
+                                <h4>Generate Proof & Complete Mint</h4>
+                                <p class="description">After sending XMR, provide the transaction details to generate a ZK proof.</p>
+                                
+                                <div class="form-group">
+                                    <label for="txHash">Transaction Hash</label>
+                                    <input type="text" id="txHash" class="input" placeholder="e.g., a1b2c3d4e5f6...">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="secretKeyR">Secret Key (r)</label>
+                                    <input type="text" id="secretKeyR" class="input" placeholder="From your Monero wallet">
+                                    <p class="input-hint">The transaction private key (tx_key)</p>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="blockHeight">Block Height</label>
+                                    <input type="number" id="blockHeight" class="input" placeholder="e.g., 3604927">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="outputIndex">Output Index</label>
+                                    <input type="number" id="outputIndex" class="input" placeholder="Usually 0 or 1" value="0">
+                                </div>
+                                
+                                <button id="generateProofBtn" class="btn btn-large btn-primary">Generate Proof & Mint</button>
                             </div>
                         </div>
                     </div>
@@ -223,10 +252,9 @@
                         </div>
 
                         <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="lpActiveCheckbox">
-                                Active (Accept new mints)
-                            </label>
+                            <label for="lpMoneroAddress">Your Monero Address</label>
+                            <input type="text" id="lpMoneroAddress" class="input" placeholder="44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A">
+                            <p class="input-hint">Users will send XMR to this address for mints. You'll be active immediately.</p>
                         </div>
 
                         <button id="registerLpBtn" class="btn btn-large btn-primary">Register as LP</button>
@@ -303,6 +331,8 @@
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- App Script (uses Viem via ES modules) -->
+    <script src="https://cdn.jsdelivr.net/npm/snarkjs@0.7.0/build/snarkjs.min.js"></script>
+    <script src="proof-gen.js"></script>
     <script type="module" src="app.js"></script>
 </body>
 </html>

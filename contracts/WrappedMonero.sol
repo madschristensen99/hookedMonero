@@ -83,8 +83,10 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         string moneroAddress;         // LP's Monero address (95 char base58)
         bytes32 privateViewKey;       // LP's Monero private view key (for amount decryption)
         bool active;                  // Is LP accepting new mints?
+        bool registered;              // Has this LP ever registered?
     }
     mapping(address => LPInfo) public lpInfo;
+    address[] public allLPs;          // Array of all registered LPs
     
     // Mint intents (user reserves capacity before sending XMR)
     struct MintIntent {
@@ -97,6 +99,7 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         bool cancelled;
     }
     mapping(bytes32 => MintIntent) public mintIntents;
+    mapping(address => bytes32[]) public userMintIntents;  // Track user's intent IDs
     
     // Track used Monero outputs
     mapping(bytes32 => bool) public usedOutputs;
@@ -312,6 +315,12 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         require(bytes(moneroAddress).length > 0, "Invalid Monero address");
         require(privateViewKey != bytes32(0), "Invalid private view key");
         
+        // Add to allLPs array if first time registering
+        if (!lpInfo[msg.sender].registered) {
+            allLPs.push(msg.sender);
+            lpInfo[msg.sender].registered = true;
+        }
+        
         lpInfo[msg.sender].mintFeeBps = mintFeeBps;
         lpInfo[msg.sender].burnFeeBps = burnFeeBps;
         lpInfo[msg.sender].moneroAddress = moneroAddress;
@@ -460,6 +469,9 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
             fulfilled: false,
             cancelled: false
         });
+        
+        // Track user's intent
+        userMintIntents[msg.sender].push(intentId);
         
         emit MintIntentCreated(intentId, msg.sender, lp, expectedAmount);
     }
@@ -897,6 +909,123 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         if (maxBackedValueEth <= currentBackedValueEth) return 0;
         
         return _ethToXmr(maxBackedValueEth - currentBackedValueEth);
+    }
+    
+    /**
+     * @notice Get total number of registered LPs
+     */
+    function getLPCount() external view returns (uint256) {
+        return allLPs.length;
+    }
+    
+    /**
+     * @notice Get all active LPs with capacity
+     * @return addresses Array of LP addresses
+     * @return moneroAddresses Array of LP Monero addresses
+     * @return mintFees Array of mint fees in bps
+     * @return capacities Array of available capacities in piconero
+     */
+    function getActiveLPs() external view returns (
+        address[] memory addresses,
+        string[] memory moneroAddresses,
+        uint256[] memory mintFees,
+        uint256[] memory capacities
+    ) {
+        // Count active LPs with capacity
+        uint256 activeCount = 0;
+        for (uint256 i = 0; i < allLPs.length; i++) {
+            address lp = allLPs[i];
+            if (lpInfo[lp].active && lpInfo[lp].collateralAmount > 0) {
+                activeCount++;
+            }
+        }
+        
+        // Allocate arrays
+        addresses = new address[](activeCount);
+        moneroAddresses = new string[](activeCount);
+        mintFees = new uint256[](activeCount);
+        capacities = new uint256[](activeCount);
+        
+        // Populate arrays
+        uint256 index = 0;
+        for (uint256 i = 0; i < allLPs.length; i++) {
+            address lp = allLPs[i];
+            LPInfo storage lpData = lpInfo[lp];
+            
+            if (lpData.active && lpData.collateralAmount > 0) {
+                addresses[index] = lp;
+                moneroAddresses[index] = lpData.moneroAddress;
+                mintFees[index] = lpData.mintFeeBps;
+                
+                // Calculate capacity
+                uint256 collateralValueEth = _wstETHToETH(lpData.collateralAmount);
+                uint256 currentBackedValueEth = _xmrToETH(lpData.backedAmount);
+                uint256 maxBackedValueEth = (collateralValueEth * 100) / SAFE_RATIO;
+                
+                if (maxBackedValueEth > currentBackedValueEth) {
+                    capacities[index] = _ethToXmr(maxBackedValueEth - currentBackedValueEth);
+                } else {
+                    capacities[index] = 0;
+                }
+                
+                index++;
+            }
+        }
+        
+        return (addresses, moneroAddresses, mintFees, capacities);
+    }
+    
+    /**
+     * @notice Get user's active mint intents
+     * @param user User address
+     * @return intentIds Array of intent IDs
+     * @return lps Array of LP addresses
+     * @return amounts Array of expected amounts
+     * @return deposits Array of deposit amounts
+     * @return timestamps Array of creation timestamps
+     */
+    function getUserMintIntents(address user) external view returns (
+        bytes32[] memory intentIds,
+        address[] memory lps,
+        uint256[] memory amounts,
+        uint256[] memory deposits,
+        uint256[] memory timestamps
+    ) {
+        bytes32[] storage userIntents = userMintIntents[user];
+        
+        // Count active intents
+        uint256 activeCount = 0;
+        for (uint256 i = 0; i < userIntents.length; i++) {
+            MintIntent storage intent = mintIntents[userIntents[i]];
+            if (!intent.fulfilled && !intent.cancelled) {
+                activeCount++;
+            }
+        }
+        
+        // Allocate arrays
+        intentIds = new bytes32[](activeCount);
+        lps = new address[](activeCount);
+        amounts = new uint256[](activeCount);
+        deposits = new uint256[](activeCount);
+        timestamps = new uint256[](activeCount);
+        
+        // Populate arrays
+        uint256 index = 0;
+        for (uint256 i = 0; i < userIntents.length; i++) {
+            bytes32 intentId = userIntents[i];
+            MintIntent storage intent = mintIntents[intentId];
+            
+            if (!intent.fulfilled && !intent.cancelled) {
+                intentIds[index] = intentId;
+                lps[index] = intent.lp;
+                amounts[index] = intent.expectedAmount;
+                deposits[index] = intent.depositAmount;
+                timestamps[index] = intent.createdAt;
+                index++;
+            }
+        }
+        
+        return (intentIds, lps, amounts, deposits, timestamps);
     }
     
     // ════════════════════════════════════════════════════════════════════════

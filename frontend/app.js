@@ -19,7 +19,7 @@ import {
 const CONFIG = {
     CHAIN_ID: 1301, // Unichain Sepolia
     RPC_URL: 'https://sepolia.unichain.org',
-    CONTRACT_ADDRESS: '0x956d362086076b05Cf90CBf2EF30689b1172c9C5',
+    CONTRACT_ADDRESS: '0x4973915d4A57C6b7A4F016354dD73CC0276FC1b2',
     EXPLORER_URL: 'https://sepolia.uniscan.xyz',
     PICONERO_PER_XMR: 1e12,
 };
@@ -83,7 +83,9 @@ const CONTRACT_ABI = [
                 { name: 'backedAmount', type: 'uint256' },
                 { name: 'mintFeeBps', type: 'uint256' },
                 { name: 'burnFeeBps', type: 'uint256' },
-                { name: 'active', type: 'bool' }
+                { name: 'moneroAddress', type: 'string' },
+                { name: 'active', type: 'bool' },
+                { name: 'registered', type: 'bool' }
             ],
             name: '',
             type: 'tuple'
@@ -116,6 +118,7 @@ const CONTRACT_ABI = [
         inputs: [
             { name: 'mintFeeBps', type: 'uint256' },
             { name: 'burnFeeBps', type: 'uint256' },
+            { name: 'moneroAddress', type: 'string' },
             { name: 'active', type: 'bool' }
         ],
         name: 'registerLP',
@@ -155,6 +158,45 @@ const CONTRACT_ABI = [
         inputs: [],
         name: 'totalLPCollateral',
         outputs: [{ name: '', type: 'uint256' }],
+        stateMutability: 'view',
+        type: 'function',
+    },
+    {
+        inputs: [],
+        name: 'MIN_INTENT_DEPOSIT',
+        outputs: [{ name: '', type: 'uint256' }],
+        stateMutability: 'view',
+        type: 'function',
+    },
+    {
+        inputs: [],
+        name: 'getLPCount',
+        outputs: [{ name: '', type: 'uint256' }],
+        stateMutability: 'view',
+        type: 'function',
+    },
+    {
+        inputs: [],
+        name: 'getActiveLPs',
+        outputs: [
+            { name: 'addresses', type: 'address[]' },
+            { name: 'moneroAddresses', type: 'string[]' },
+            { name: 'mintFees', type: 'uint256[]' },
+            { name: 'capacities', type: 'uint256[]' }
+        ],
+        stateMutability: 'view',
+        type: 'function',
+    },
+    {
+        inputs: [{ name: 'user', type: 'address' }],
+        name: 'getUserMintIntents',
+        outputs: [
+            { name: 'intentIds', type: 'bytes32[]' },
+            { name: 'lps', type: 'address[]' },
+            { name: 'amounts', type: 'uint256[]' },
+            { name: 'deposits', type: 'uint256[]' },
+            { name: 'timestamps', type: 'uint256[]' }
+        ],
         stateMutability: 'view',
         type: 'function',
     },
@@ -301,6 +343,8 @@ function setupEventListeners() {
     document.getElementById('createIntentBtn').addEventListener('click', createMintIntent);
     const copyBtn = document.getElementById('copyAddressBtn');
     if (copyBtn) copyBtn.addEventListener('click', copyMoneroAddress);
+    const generateProofBtn = document.getElementById('generateProofBtn');
+    if (generateProofBtn) generateProofBtn.addEventListener('click', generateProofAndMint);
     
     // Burn tab
     document.getElementById('burnBtn').addEventListener('click', requestBurn);
@@ -474,18 +518,62 @@ function updateWalletUI() {
 // Data Loading
 // ============================================
 async function loadInitialData() {
-    // Load mock LP data for now
     const lpSelect = document.getElementById('lpSelect');
     const burnLpSelect = document.getElementById('burnLpSelect');
     
-    // TODO: Load actual LPs from contract
-    lpSelect.innerHTML = '<option value="">Select a liquidity provider...</option>';
-    burnLpSelect.innerHTML = '<option value="">Select a liquidity provider...</option>';
+    lpSelect.innerHTML = '<option value="">Loading LPs...</option>';
+    burnLpSelect.innerHTML = '<option value="">Loading LPs...</option>';
     
-    // Add placeholder
-    const option = '<option value="0x0000000000000000000000000000000000000000">No LPs available yet</option>';
-    lpSelect.innerHTML += option;
-    burnLpSelect.innerHTML += option;
+    if (!state.publicClient) return;
+    
+    try {
+        // Fetch minimum intent deposit
+        const minDeposit = await state.publicClient.readContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'MIN_INTENT_DEPOSIT'
+        });
+        const depositEth = formatEther(minDeposit);
+        document.getElementById('intentDepositDisplay').textContent = depositEth;
+        // Store it for later use
+        state.minIntentDeposit = minDeposit;
+    } catch (error) {
+        console.error('Error loading min deposit:', error);
+        document.getElementById('intentDepositDisplay').textContent = '0.001';
+        state.minIntentDeposit = parseEther('0.001');
+    }
+    
+    try {
+        // Fetch active LPs from contract
+        const result = await state.publicClient.readContract({
+            address: CONFIG.CONTRACT_ADDRESS,
+            abi: CONTRACT_ABI,
+            functionName: 'getActiveLPs'
+        });
+        
+        const [addresses, moneroAddresses, mintFees, capacities] = result;
+        
+        lpSelect.innerHTML = '<option value="">Select a liquidity provider...</option>';
+        burnLpSelect.innerHTML = '<option value="">Select a liquidity provider...</option>';
+        
+        if (addresses.length === 0) {
+            const option = '<option value="" disabled>No active LPs available</option>';
+            lpSelect.innerHTML += option;
+            burnLpSelect.innerHTML += option;
+        } else {
+            for (let i = 0; i < addresses.length; i++) {
+                const capacity = formatUnits(capacities[i], 12);
+                const fee = (Number(mintFees[i]) / 100).toFixed(2);
+                const option = `<option value="${addresses[i]}">${formatAddress(addresses[i])} - Fee: ${fee}% - Capacity: ${parseFloat(capacity).toFixed(4)} XMR</option>`;
+                lpSelect.innerHTML += option;
+                burnLpSelect.innerHTML += option;
+            }
+        }
+    } catch (error) {
+        console.error('Error loading LPs:', error);
+        lpSelect.innerHTML = '<option value="">Error loading LPs</option>';
+        burnLpSelect.innerHTML = '<option value="">Error loading LPs</option>';
+    }
 }
 
 async function loadUserData() {
@@ -609,14 +697,15 @@ function handleLPSelection(event) {
 
 async function loadLPDetails(lpAddress) {
     try {
-        const lpInfo = await state.publicClient.readContract({
-            address: CONFIG.CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
-            functionName: 'lpInfo',
-            args: [lpAddress]
-        });
-        
-        document.getElementById('lpMintFee').textContent = (Number(lpInfo.mintFeeBps) / 100).toFixed(2) + '%';
+        // Get fee from the select option (already loaded from getActiveLPs)
+        const selectElement = document.getElementById('lpSelect');
+        const selectedOption = selectElement.options[selectElement.selectedIndex];
+        if (selectedOption && selectedOption.text.includes('Fee:')) {
+            const feeMatch = selectedOption.text.match(/Fee: ([\d.]+)%/);
+            if (feeMatch) {
+                document.getElementById('lpMintFee').textContent = feeMatch[1] + '%';
+            }
+        }
         
         // Load capacity
         try {
@@ -629,6 +718,7 @@ async function loadLPDetails(lpAddress) {
             const capacityXMR = formatUnits(capacity, 12);
             document.getElementById('lpCapacity').textContent = parseFloat(capacityXMR).toFixed(4) + ' XMR';
         } catch (e) {
+            console.error('Error loading capacity:', e);
             document.getElementById('lpCapacity').textContent = 'N/A';
         }
         
@@ -640,8 +730,15 @@ async function loadLPDetails(lpAddress) {
                 functionName: 'getLPRatio',
                 args: [lpAddress]
             });
-            document.getElementById('lpRatio').textContent = ratio.toString() + '%';
+            // Check if ratio is max uint256 (no backing yet)
+            const maxUint256 = 115792089237316195423570985008687907853269984665640564039457584007913129639935n;
+            if (ratio >= maxUint256) {
+                document.getElementById('lpRatio').textContent = '∞ (No backing yet)';
+            } else {
+                document.getElementById('lpRatio').textContent = ratio.toString() + '%';
+            }
         } catch (e) {
+            console.error('Error loading ratio:', e);
             document.getElementById('lpRatio').textContent = 'N/A';
         }
         
@@ -658,10 +755,14 @@ async function createMintIntent() {
     
     const lpAddress = document.getElementById('lpSelect').value;
     const amount = document.getElementById('mintAmount').value;
-    const deposit = document.getElementById('intentDeposit').value;
     
-    if (!lpAddress || !amount || !deposit) {
+    if (!lpAddress || !amount) {
         showToast('Please fill in all fields', 'warning');
+        return;
+    }
+    
+    if (!state.minIntentDeposit) {
+        showToast('Loading contract data, please wait...', 'warning');
         return;
     }
     
@@ -670,18 +771,23 @@ async function createMintIntent() {
         
         // Convert amount to piconero
         const amountPiconero = parseUnits(amount, 12);
-        const depositWei = parseEther(deposit);
+        const depositWei = state.minIntentDeposit;
         
         const hash = await state.walletClient.writeContract({
             address: CONFIG.CONTRACT_ADDRESS,
             abi: CONTRACT_ABI,
             functionName: 'createMintIntent',
             args: [lpAddress, amountPiconero],
-            value: depositWei
+            value: depositWei,
+            gas: 300000n
         });
         
         showLoading('Waiting for confirmation...');
-        const receipt = await state.publicClient.waitForTransactionReceipt({ hash });
+        const receipt = await state.publicClient.waitForTransactionReceipt({ 
+            hash,
+            pollingInterval: 2000,
+            timeout: 120000
+        });
         
         // Parse event to get intent ID
         let intentId = 'N/A';
@@ -703,9 +809,29 @@ async function createMintIntent() {
         
         hideLoading();
         
+        // Get LP's Monero address from the select option
+        const selectElement = document.getElementById('lpSelect');
+        let moneroAddress = 'Loading...';
+        
+        try {
+            // Fetch from getActiveLPs to get the Monero address
+            const result = await state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: CONTRACT_ABI,
+                functionName: 'getActiveLPs'
+            });
+            const [addresses, moneroAddresses] = result;
+            const lpIndex = addresses.findIndex(addr => addr.toLowerCase() === lpAddress.toLowerCase());
+            if (lpIndex !== -1) {
+                moneroAddress = moneroAddresses[lpIndex];
+            }
+        } catch (e) {
+            console.error('Error fetching LP Monero address:', e);
+        }
+        
         // Show instructions
         document.getElementById('intentId').textContent = intentId;
-        document.getElementById('xmrAddress').textContent = 'TODO: Get Monero address from LP';
+        document.getElementById('xmrAddress').textContent = moneroAddress;
         document.getElementById('mintInstructions').classList.remove('hidden');
         
         showToast('Mint intent created successfully!', 'success');
@@ -759,11 +885,16 @@ async function requestBurn() {
             address: CONFIG.CONTRACT_ADDRESS,
             abi: CONTRACT_ABI,
             functionName: 'requestBurn',
-            args: [lpAddress, amountPiconero, xmrAddress]
+            args: [lpAddress, amountPiconero, xmrAddress],
+            gas: 300000n
         });
         
         showLoading('Waiting for confirmation...');
-        await state.publicClient.waitForTransactionReceipt({ hash });
+        await state.publicClient.waitForTransactionReceipt({ 
+            hash,
+            pollingInterval: 2000,
+            timeout: 120000
+        });
         
         hideLoading();
         showToast('Burn request submitted successfully!', 'success');
@@ -792,10 +923,17 @@ async function registerAsLP() {
     
     const mintFee = document.getElementById('lpMintFeeInput').value;
     const burnFee = document.getElementById('lpBurnFeeInput').value;
-    const active = document.getElementById('lpActiveCheckbox').checked;
+    const moneroAddress = document.getElementById('lpMoneroAddress').value;
+    const active = true; // Always active when registering
     
-    if (!mintFee || !burnFee) {
+    if (!mintFee || !burnFee || !moneroAddress) {
         showToast('Please fill in all fields', 'warning');
+        return;
+    }
+    
+    // Basic Monero address validation (mainnet starts with 4, testnet with 5/9, subaddress with 8)
+    if (moneroAddress.length < 95) {
+        showToast('Invalid Monero address (too short)', 'error');
         return;
     }
     
@@ -806,11 +944,16 @@ async function registerAsLP() {
             address: CONFIG.CONTRACT_ADDRESS,
             abi: CONTRACT_ABI,
             functionName: 'registerLP',
-            args: [BigInt(mintFee), BigInt(burnFee), active]
+            args: [BigInt(mintFee), BigInt(burnFee), moneroAddress, active],
+            gas: 500000n
         });
         
         showLoading('Waiting for confirmation...');
-        await state.publicClient.waitForTransactionReceipt({ hash });
+        await state.publicClient.waitForTransactionReceipt({ 
+            hash,
+            pollingInterval: 2000,
+            timeout: 120000
+        });
         
         hideLoading();
         showToast('Successfully registered as LP!', 'success');
@@ -847,11 +990,16 @@ async function depositCollateral() {
             address: CONFIG.CONTRACT_ADDRESS,
             abi: CONTRACT_ABI,
             functionName: 'lpDeposit',
-            value: amountWei
+            value: amountWei,
+            gas: 300000n
         });
         
         showLoading('Waiting for confirmation...');
-        await state.publicClient.waitForTransactionReceipt({ hash });
+        await state.publicClient.waitForTransactionReceipt({ 
+            hash,
+            pollingInterval: 2000,
+            timeout: 120000
+        });
         
         hideLoading();
         showToast('Collateral deposited successfully!', 'success');
