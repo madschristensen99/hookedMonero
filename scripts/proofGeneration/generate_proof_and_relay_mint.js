@@ -323,11 +323,21 @@ async function main() {
     const nonce = await mintRelayer.getNonce(signer.address);
     const deadline = Math.floor(Date.now() / 1000) + 3600;
     
+    // Calculate expected amount after LP fee (0.5% = 50 bps)
+    const lpFeeBps = 50n;
+    const lpFee = (amountPiconero * lpFeeBps) / 10000n;
+    const expectedAfterFee = amountPiconero - lpFee;
+    
+    console.log("   Amount calculation:");
+    console.log("     Gross amount:", amountPiconero.toString(), "piconero");
+    console.log("     LP fee (0.5%):", lpFee.toString(), "piconero");
+    console.log("     Expected net:", expectedAfterFee.toString(), "piconero");
+    
     const intent = {
         signer: signer.address,
         recipient: FRESH_ADDRESS, // Fresh address!
         lp: signer.address,
-        expectedAmount: amountPiconero.toString(),
+        expectedAmount: expectedAfterFee.toString(),
         nonce: nonce,
         deadline: deadline,
         maxRelayerFee: hre.ethers.parseUnits("0.00001", 12)

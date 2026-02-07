@@ -2,17 +2,17 @@
   "network": "unichain_testnet",
   "chainId": "1301",
   "deployer": "0x492c0b9F298cC49FE2644a2EBc6eA8dF848c72FB",
-  "timestamp": "2026-02-04T16:59:30.993Z",
+  "timestamp": "2026-02-07T22:15:46.653Z",
   "contracts": {
-    "PlonkVerifier": "0x6ABAEB70c9BA9EA497Ff5e20D08bd20Ca1E02139",
-    "WrappedMonero": "0xCE92E887d225D06c21a16d845D88E980d536FA2b",
-    "MintRelayer": "0xae6ABe7f1c57Fe3cfd81F8b6A139E2203a23337D"
+    "PlonkVerifier": "0x779DA9ac5Cb031E86f4e505Bc11AE97731a8e518",
+    "WrappedMonero": "0x1aFE6c215A3b7136dA30c405C436f668f3dec4BA",
+    "MintRelayer": "0xbF9Aff472b81D36971b3328f79fA661610fE8675"
   },
   "dependencies": {
     "wstETH": "0xc02fe7317d4eb8753a02c35fe019786854a92001",
     "pyth": "0x2880aB155794e7179c9eE2e38200202908C17B43",
-    "oracle": "your_oracle_address_here"
+    "oracle": "0x492c0b9F298cC49FE2644a2EBc6eA8dF848c72FB"
   },
-  "wrappedMonero": "0xCE92E887d225D06c21a16d845D88E980d536FA2b",
-  "mintRelayerDeployedAt": "2026-02-07T20:50:22.815Z"
+  "wrappedMonero": "0x1aFE6c215A3b7136dA30c405C436f668f3dec4BA",
+  "mintRelayerDeployedAt": "2026-02-07T22:16:04.410Z"
 }

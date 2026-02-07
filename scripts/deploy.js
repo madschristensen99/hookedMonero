@@ -80,8 +80,8 @@ async function main() {
   console.log("[3/3] Deploying WrappedMonero...");
   const WrappedMonero = await hre.ethers.getContractFactory("WrappedMonero");
   
-  // Initial Monero block height (current mainnet height as of deployment)
-  const initialMoneroBlock = 3200000;
+  // Initial Monero block height (set to just before our test transaction at 3605080)
+  const initialMoneroBlock = 3605079;
 
   console.log("Configuration:");
   console.log("  Initial Monero Block:", initialMoneroBlock);
