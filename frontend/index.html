@@ -153,18 +153,10 @@
 
                         <button id="createIntentBtn" class="btn btn-large btn-primary">Create Mint Intent</button>
                         
-                        <div id="mintInstructions" class="instructions hidden">
-                            <div class="alert alert-info">
-                                <h4>✅ Intent Created!</h4>
-                                <p><strong>Intent ID:</strong> <span id="intentId"></span></p>
-                                <p><strong>Send XMR to:</strong></p>
-                                <code id="xmrAddress" class="monero-address"></code>
-                                <button class="btn btn-secondary btn-small" id="copyAddressBtn">Copy Address</button>
-                            </div>
-                            
-                            <div class="card mt-3">
-                                <h4>Generate Proof & Complete Mint</h4>
-                                <p class="description">After sending XMR, provide the transaction details to generate a ZK proof.</p>
+                        <!-- Generate Proof Section - Always Visible -->
+                        <div class="card mt-3" style="border: 2px solid #2196F3; background: #f0f8ff; padding: 1.5rem;">
+                            <h3 style="color: #2196F3; margin-bottom: 0.5rem;">📝 Generate Proof & Complete Mint</h3>
+                            <p class="description" style="margin-bottom: 1.5rem;">After sending XMR to the address shown in your active intent above, provide the transaction details here to generate a ZK proof and complete your mint.</p>
                                 
                                 <div class="form-group">
                                     <label for="txHash">Transaction Hash</label>
@@ -182,13 +174,10 @@
                                     <input type="number" id="blockHeight" class="input" placeholder="e.g., 3604927">
                                 </div>
                                 
-                                <div class="form-group">
-                                    <label for="outputIndex">Output Index</label>
-                                    <input type="number" id="outputIndex" class="input" placeholder="Usually 0 or 1" value="0">
-                                </div>
+                                <!-- Output index will be auto-detected -->
+                                <input type="hidden" id="outputIndex" value="1">
                                 
-                                <button id="generateProofBtn" class="btn btn-large btn-primary">Generate Proof & Mint</button>
-                            </div>
+                            <button id="generateProofBtn" class="btn btn-large btn-primary">Generate Proof & Mint</button>
                         </div>
                     </div>
                 </div>
@@ -417,8 +406,11 @@
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- App Script (uses Viem via ES modules) -->
+    <!-- Crypto libraries for proof generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-sha3/0.9.2/sha3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@noble/ed25519@2.0.0/+esm" type="module"></script>
     <script src="https://cdn.jsdelivr.net/npm/snarkjs@0.7.0/build/snarkjs.min.js"></script>
-    <script src="proof-gen.js"></script>
+
     <script type="module" src="app.js"></script>
 </body>
 </html>
