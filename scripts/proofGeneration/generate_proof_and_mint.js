@@ -58,13 +58,22 @@ async function main() {
     for (let i = 0; i < 30; i++) {
         try {
             const blockInfo = await bridge.moneroBlocks(BLOCK_HEIGHT);
-            if (blockInfo.exists) {
+            console.log("   DEBUG blockInfo:", blockInfo);
+            console.log("   DEBUG blockInfo.blockHash:", blockInfo.blockHash);
+            console.log("   DEBUG blockInfo[0]:", blockInfo[0]);
+            // Check if blockHash is non-zero (block exists)
+            const blockHash = blockInfo.blockHash || blockInfo[0];
+            if (blockHash && blockHash !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
                 console.log("   ✅ Block", BLOCK_HEIGHT, "found on-chain!");
+                console.log("   Block hash:", blockInfo.blockHash);
                 console.log("   TX Merkle root:", blockInfo.txMerkleRoot);
+                console.log("   Output Merkle root:", blockInfo.outputMerkleRoot);
                 blockExists = true;
                 break;
             }
-        } catch(e) {}
+        } catch(e) {
+            console.log("   Error checking block:", e.message);
+        }
         
         if (i === 0) console.log("   Waiting for oracle to post block...");
         await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
@@ -352,9 +361,10 @@ async function main() {
     // amount_piconero already defined from decryption above
     
     // Create output struct
+    // IMPORTANT: Use GLOBAL output index, not local OUTPUT_INDEX!
     const output = {
         txHash: "0x" + TX_HASH,
-        outputIndex: BigInt(OUTPUT_INDEX),
+        outputIndex: BigInt(globalOutputIndex),  // Use global index!
         ecdhAmount: "0x" + ecdhAmount.padStart(64, '0'),
         outputPubKey: "0x" + outputKey,
         commitment: "0x" + commitment,
@@ -394,6 +404,7 @@ async function main() {
             BigInt(globalOutputIndex),  // Use global output index
             signer.address, // recipient
             signer.address, // LP (yourself)
+            "0x" + R_hex,  // Transaction public key for verification
             [] // No price update data
         );
         

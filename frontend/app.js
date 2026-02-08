@@ -35,7 +35,7 @@ import * as ed from 'https://cdn.jsdelivr.net/npm/@noble/ed25519@1.7.3/+esm';
 const CONFIG = {
     CHAIN_ID: 1301, // Unichain Sepolia
     RPC_URL: 'https://sepolia.unichain.org',
-    CONTRACT_ADDRESS: '0x4b6d4Cb39F727Fd1D98480339AdF815F4ee26148', // Latest: Fixed view functions + ETH collateral
+    CONTRACT_ADDRESS: '0x84F8Eb0DE81B1f8422Acbd887BeE2Ee982182d41', // Secure deployment with TX pubkey verification
     EXPLORER_URL: 'https://sepolia.uniscan.xyz',
     PICONERO_PER_XMR: 1e12,
 };
@@ -205,6 +205,7 @@ const CONTRACT_ABI = [
             { name: 'outputIndex', type: 'uint256' },
             { name: 'recipient', type: 'address' },
             { name: 'lp', type: 'address' },
+            { name: 'txPublicKey', type: 'bytes32' },
             { name: 'priceUpdateData', type: 'bytes[]' }
         ],
         name: 'mint',
@@ -707,9 +708,13 @@ async function loadUserData() {
 }
 
 async function loadMintIntents() {
-    if (!state.publicClient || !state.userAddress) return;
+    if (!state.publicClient || !state.userAddress) {
+        console.log('loadMintIntents: Missing publicClient or userAddress');
+        return;
+    }
     
     try {
+        console.log('loadMintIntents: Fetching intents for', state.userAddress);
         const result = await state.publicClient.readContract({
             address: CONFIG.CONTRACT_ADDRESS,
             abi: CONTRACT_ABI,
@@ -717,6 +722,7 @@ async function loadMintIntents() {
             args: [state.userAddress]
         });
         
+        console.log('loadMintIntents: Raw result:', result);
         const [intentIds, lps, amounts, deposits, timestamps] = result;
         
         // Clear existing intents display
@@ -724,9 +730,12 @@ async function loadMintIntents() {
         if (!intentsList) return;
         
         if (intentIds.length === 0) {
+            console.log('loadMintIntents: No intents found');
             intentsList.innerHTML = '<p class="empty-state">No active mint intents</p>';
             return;
         }
+        
+        console.log('loadMintIntents: Found', intentIds.length, 'intents');
         
         intentsList.innerHTML = '';
         
@@ -1695,7 +1704,8 @@ async function computeOutputMerkleProof(blockHeight, txHash, outputIndex) {
                 
                 allOutputs.push({
                     txHash: '0x' + txHashInBlock,
-                    outputIndex: j,
+                    outputIndex: j, // Local index within TX
+                    globalOutputIndex: currentGlobalIndex, // Global index in block
                     ecdhAmount: '0x' + ecdhAmount.padStart(64, '0'),
                     outputPubKey: '0x' + outputKey,
                     commitment: '0x' + commitment
@@ -1714,16 +1724,31 @@ async function computeOutputMerkleProof(blockHeight, txHash, outputIndex) {
     console.log(`  Target output global index: ${targetGlobalIndex}`);
     
     // 4. Build output Merkle tree leaves (keccak256 of packed data)
-    const leaves = allOutputs.map(out => {
-        // Pack: txHash || outputIndex || ecdhAmount || outputPubKey || commitment
+    const leaves = allOutputs.map((out, idx) => {
+        // Pack: txHash || globalOutputIndex || ecdhAmount || outputPubKey || commitment
+        // IMPORTANT: Use globalOutputIndex, not local outputIndex!
         const packed = concat([
             out.txHash,
-            toHex(BigInt(out.outputIndex), { size: 32 }),
+            toHex(BigInt(out.globalOutputIndex), { size: 32 }),
             out.ecdhAmount,
             out.outputPubKey,
             out.commitment
         ]);
-        return keccak256(packed);
+        const leaf = keccak256(packed);
+        
+        // Log the target output's leaf computation
+        if (idx === targetGlobalIndex) {
+            console.log('  Target output leaf computation:');
+            console.log('    txHash:', out.txHash);
+            console.log('    globalOutputIndex:', out.globalOutputIndex);
+            console.log('    ecdhAmount:', out.ecdhAmount);
+            console.log('    outputPubKey:', out.outputPubKey);
+            console.log('    commitment:', out.commitment);
+            console.log('    packed:', packed);
+            console.log('    leaf hash:', leaf);
+        }
+        
+        return leaf;
     });
     
     // 5. Compute Merkle proof using SHA256 (matches oracle)
@@ -2084,8 +2109,8 @@ async function generateProofAndMint() {
     try {
         // Step 1: Fetch transaction data and block height from Monero blockchain
         showLoading('Step 1/5: Fetching transaction from Monero blockchain...');
-        // Use CORS proxy for Monero daemon endpoint (not json_rpc)
-        const moneroRpcUrl = 'https://corsproxy.io/?' + encodeURIComponent('http://xmr.privex.io:18081/get_transactions');
+        // Use CORS-enabled public node from monero.fail
+        const moneroRpcUrl = 'https://node.sethforprivacy.com/get_transactions';
         
         const txResponse = await fetch(moneroRpcUrl, {
             method: 'POST',
@@ -2118,11 +2143,46 @@ async function generateProofAndMint() {
         const txInfo = txData.txs[0];
         const blockHeight = txInfo.block_height;
         
-        if (!blockHeight) {
-            throw new Error('Transaction not yet confirmed in a block');
+        if (!blockHeight || blockHeight === 0) {
+            throw new Error('Transaction not yet confirmed in a block. Please wait for confirmation.');
         }
         
         console.log('✅ Transaction found in block:', blockHeight);
+        
+        // Step 1.5: Check if block has been posted by oracle
+        showLoading('Step 1.5/5: Verifying block has been posted by oracle...');
+        try {
+            const postedBlock = await state.publicClient.readContract({
+                address: CONFIG.CONTRACT_ADDRESS,
+                abi: [{
+                    inputs: [{ name: 'blockHeight', type: 'uint256' }],
+                    name: 'moneroBlocks',
+                    outputs: [
+                        { name: 'blockHash', type: 'bytes32' },
+                        { name: 'txMerkleRoot', type: 'bytes32' },
+                        { name: 'outputMerkleRoot', type: 'bytes32' },
+                        { name: 'timestamp', type: 'uint256' }
+                    ],
+                    stateMutability: 'view',
+                    type: 'function'
+                }],
+                functionName: 'moneroBlocks',
+                args: [BigInt(blockHeight)]
+            });
+            
+            console.log('Posted block info:', postedBlock);
+            
+            if (!postedBlock || postedBlock[0] === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+                hideLoading();
+                showToast(`Block ${blockHeight} has not been posted by the oracle yet. Please wait for the oracle to post it (polls every 20 seconds).`, 'warning');
+                return;
+            }
+            
+            console.log('✅ Block has been posted by oracle');
+        } catch (e) {
+            console.error('Error checking if block posted:', e);
+            // Continue anyway - the mint will fail if block not posted
+        }
         
         // Step 2: Auto-detect output index
         showLoading('Step 2/5: Detecting output index...');
@@ -2150,9 +2210,14 @@ async function generateProofAndMint() {
         console.log('Output structure:', output);
         
         // Extract output data based on actual Monero structure
-        const ecdhAmount = output.amount || output.ecdhInfo?.amount || '0';
+        // ECDH amount is in rct_signatures.ecdhInfo, not in the output itself
+        let ecdhAmount = tx.rct_signatures?.ecdhInfo?.[outputIndex]?.amount || '0';
+        // Ensure it has 0x prefix for BigInt parsing
+        if (ecdhAmount && !ecdhAmount.startsWith('0x')) {
+            ecdhAmount = '0x' + ecdhAmount;
+        }
         const outputKey = output.target?.key || output.target?.tagged_key?.key;
-        const commitment = output.target?.key || output.target?.tagged_key?.key;
+        const commitment = tx.rct_signatures?.outPk?.[outputIndex] || output.target?.key || output.target?.tagged_key?.key;
         
         console.log('✅ Output data extracted:');
         console.log('  ecdhAmount:', ecdhAmount);
@@ -2249,20 +2314,58 @@ async function generateProofAndMint() {
         // Extract transaction public key R from extra field
         showLoading('Step 4/9: Extracting transaction public key...');
         const txExtra = tx.extra;
-        // TX public key is in extra field with tag 0x01, followed by 32 bytes
-        let txPublicKey = null;
+        
+        // Debug: show first 100 bytes of extra field
+        console.log('🔍 Extra field (first 100 bytes):', txExtra.slice(0, 100));
+        console.log('🔍 Extra field length:', txExtra.length);
+        
+        // Main TX public key (tag 0x01)
+        let mainTxPublicKey = null;
         for (let i = 0; i < txExtra.length - 32; i++) {
-            if (txExtra[i] === 1) { // Tag for TX public key
-                txPublicKey = txExtra.slice(i + 1, i + 33).map(b => b.toString(16).padStart(2, '0')).join('');
+            if (txExtra[i] === 1) {
+                mainTxPublicKey = txExtra.slice(i + 1, i + 33).map(b => b.toString(16).padStart(2, '0')).join('');
                 break;
             }
+        }
+        
+        // Additional public keys for subaddresses (tag 0x04)
+        let additionalPublicKeys = [];
+        for (let i = 0; i < txExtra.length; i++) {
+            if (txExtra[i] === 4) { // Tag for additional public keys
+                // Next byte is the number of additional keys
+                const numKeys = txExtra[i + 1];
+                for (let j = 0; j < numKeys; j++) {
+                    const keyStart = i + 2 + (j * 32);
+                    if (keyStart + 32 <= txExtra.length) {
+                        const key = txExtra.slice(keyStart, keyStart + 32).map(b => b.toString(16).padStart(2, '0')).join('');
+                        additionalPublicKeys.push(key);
+                    }
+                }
+                break;
+            }
+        }
+        
+        // Debug: show all keys found
+        console.log('🔍 Main TX public key:', mainTxPublicKey);
+        console.log('🔍 Additional public keys found:', additionalPublicKeys.length);
+        if (additionalPublicKeys.length > 0) {
+            additionalPublicKeys.forEach((key, idx) => {
+                console.log(`  [${idx}]:`, key);
+            });
+        }
+        
+        // For subaddress outputs, use additional public key at output index
+        let txPublicKey = mainTxPublicKey;
+        if (additionalPublicKeys.length > 0 && outputIndex < additionalPublicKeys.length) {
+            txPublicKey = additionalPublicKeys[outputIndex];
+            console.log('✅ Using additional public key for output', outputIndex, ':', txPublicKey);
+        } else {
+            console.log('✅ Using main transaction public key R:', txPublicKey);
         }
         
         if (!txPublicKey) {
             throw new Error('Could not find transaction public key in extra field');
         }
-        
-        console.log('✅ Transaction public key R:', txPublicKey);
         
         // Decrypt amount using LP's private view key
         showLoading('Step 4.5/9: Decrypting amount...');
@@ -2298,6 +2401,12 @@ async function generateProofAndMint() {
         
         // H_s scalar - convert from hex to bits
         const H_s_scalar_bits = hexToBits(H_s_hex, 255);
+        
+        // Ensure top 3 bits are 0 (required by circuit to ensure H_s < L)
+        H_s_scalar_bits[252] = 0;
+        H_s_scalar_bits[253] = 0;
+        H_s_scalar_bits[254] = 0;
+        
         let H_s_num = 0n;
         for (let i = 0; i < 255; i++) {
             if (H_s_scalar_bits[i]) H_s_num += (1n << BigInt(i));
@@ -2307,9 +2416,15 @@ async function generateProofAndMint() {
         const v = amountPiconero;
         
         // Ed25519 points from computed operations
-        const R_x = BigInt(ed25519Ops.R_x);
-        const S_x = BigInt(ed25519Ops.S_x);
-        const P_x = BigInt(ed25519Ops.P_x);
+        // BN254 field modulus (circuit operates in this field)
+        const BN254_MODULUS = BigInt('21888242871839275222246405745257275088548364400416034343698204186575808495617');
+        
+        // Reduce Ed25519 coordinates modulo BN254 field to match circuit behavior
+        const R_x = BigInt(ed25519Ops.R_x) % BN254_MODULUS;
+        const S_x = BigInt(ed25519Ops.S_x) % BN254_MODULUS;
+        const P_x = BigInt(ed25519Ops.P_x) % BN254_MODULUS;
+        
+        console.log('🔢 R_x (reduced):', R_x.toString());
         
         // Compute Poseidon commitment: hash(r, v, H_s, R_x, S_x, P_x)
         const commitmentValue = poseidonHash.F.toString(
@@ -2334,8 +2449,16 @@ async function generateProofAndMint() {
             S_x: S_x.toString(),
             P_x: P_x.toString(),
             
-            // ECDH encrypted amount
-            ecdhAmount: ecdhAmount || '0',
+            // ECDH encrypted amount (convert hex to little-endian number for circuit)
+            ecdhAmount: (() => {
+                const hex = (ecdhAmount || '0').replace(/^0x/, '');
+                const bytes = new Uint8Array(hex.match(/.{2}/g).map(b => parseInt(b, 16)));
+                let num = 0n;
+                for (let i = 0; i < bytes.length; i++) {
+                    num |= BigInt(bytes[i]) << (BigInt(i) * 8n);
+                }
+                return num.toString();
+            })(),
             
             // Amount key (64 bits) - compute from H_s
             amountKey: (() => {
@@ -2420,15 +2543,19 @@ async function generateProofAndMint() {
             const outputMerkleData = await computeOutputMerkleProof(blockHeight, originalTxHash, outputIndex);
             console.log('✅ Output Merkle proof computed:', outputMerkleData);
             
+            // Extract global output index and proof from result
+            const globalOutputIndex = BigInt(outputMerkleData.outputIndex);
+            const outputMerkleProof = outputMerkleData.proof;
+            
             // Step 10: Call mint function
             showLoading('Step 9/9: Submitting mint transaction...');
             
-            // Prepare output struct - use LOCAL output index (in transaction)
-            // The GLOBAL index is passed separately as outputIndex parameter
+            // Prepare output struct
+            // CRITICAL: Use GLOBAL output index (from Merkle proof), not local outputIndex!
             const output = {
                 txHash: '0x' + originalTxHash,
-                outputIndex: BigInt(outputIndex), // LOCAL index in the transaction
-                ecdhAmount: '0x' + (ecdhAmount || '0').padStart(64, '0'),
+                outputIndex: globalOutputIndex,  // Use GLOBAL index from Merkle computation!
+                ecdhAmount: '0x' + (ecdhAmount || '0').replace(/^0x/, '').padStart(64, '0'),
                 outputPubKey: '0x' + outputKey,
                 commitment: '0x' + commitment
             };
@@ -2437,9 +2564,7 @@ async function generateProofAndMint() {
             const dleqProof = ed25519Ops.dleqProof;
             const ed25519Proof = ed25519Ops.ed25519Proof;
             
-            // Use computed output Merkle proof
-            const outputMerkleProof = outputMerkleData.proof;
-            const globalOutputIndex = BigInt(outputMerkleData.outputIndex);
+            // Variables already extracted above - no need to redeclare
             
             console.log('Calling mint with:');
             console.log('  Proof:', proofArray);
@@ -2473,6 +2598,42 @@ async function generateProofAndMint() {
             validateBytes32(dleqProof.K2, 'dleqProof.K2');
             
             try {
+                // Use the reduced R_x from publicSignals[1] (matches circuit's BN254 field reduction)
+                const txPublicKeyForContract = '0x' + BigInt(publicSignals[1]).toString(16).padStart(64, '0');
+                console.log('🔑 Using txPublicKey for contract:', txPublicKeyForContract);
+                console.log('🔑 This equals publicSignals[1]:', publicSignals[1]);
+                
+                // First, simulate the transaction to catch any revert errors
+                console.log('Simulating transaction...');
+                try {
+                    await state.publicClient.simulateContract({
+                        address: CONFIG.CONTRACT_ADDRESS,
+                        abi: CONTRACT_ABI,
+                        functionName: 'mint',
+                        args: [
+                            proofArray,
+                            publicSignals,
+                            dleqProof,
+                            ed25519Proof,
+                            output,
+                            BigInt(blockHeight),
+                            txMerkleData.proof,
+                            BigInt(txMerkleData.txIndex),
+                            outputMerkleProof,
+                            globalOutputIndex,
+                            state.userAddress,
+                            state.userAddress,
+                            txPublicKeyForContract,  // Use computed R from proof
+                            []
+                        ],
+                        account: state.userAddress
+                    });
+                    console.log('✅ Simulation successful');
+                } catch (simError) {
+                    console.error('❌ Simulation failed:', simError);
+                    throw new Error(`Transaction would revert: ${simError.message}`);
+                }
+                
                 const hash = await state.walletClient.writeContract({
                     address: CONFIG.CONTRACT_ADDRESS,
                     abi: CONTRACT_ABI,
@@ -2490,6 +2651,7 @@ async function generateProofAndMint() {
                         globalOutputIndex,
                         state.userAddress, // recipient
                         state.userAddress, // LP (for now, same as recipient)
+                        txPublicKeyForContract,  // Use computed R from proof
                         [] // No price update data
                     ],
                     gas: 5000000n
@@ -2691,7 +2853,35 @@ async function waitForReceipt(hash) {
         // Check if transaction reverted
         if (receipt.status === 'reverted') {
             console.error('Transaction reverted:', receipt);
-            throw new Error('Transaction reverted on-chain. Check block explorer for details.');
+            
+            // Try to get revert reason
+            let revertReason = 'Unknown reason';
+            try {
+                const tx = await state.publicClient.getTransaction({ hash });
+                // Simulate the transaction to get revert reason
+                const result = await state.publicClient.call({
+                    to: tx.to,
+                    data: tx.input,
+                    from: tx.from,
+                    value: tx.value,
+                    blockNumber: receipt.blockNumber
+                });
+                console.log('Call result:', result);
+            } catch (e) {
+                console.log('Revert error:', e);
+                if (e.message) {
+                    // Extract revert reason from error message
+                    const match = e.message.match(/reverted with reason string '(.+?)'/);
+                    if (match) revertReason = match[1];
+                    else if (e.message.includes('execution reverted:')) {
+                        revertReason = e.message.split('execution reverted:')[1].trim();
+                    } else {
+                        revertReason = e.message;
+                    }
+                }
+            }
+            
+            throw new Error(`Transaction reverted: ${revertReason}. Check block explorer for details.`);
         }
         
         return receipt;

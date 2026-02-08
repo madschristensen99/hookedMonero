@@ -520,6 +520,7 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         uint256 outputIndex,
         address recipient,
         address lp,
+        bytes32 txPublicKey,  // Transaction public key R from Monero TX
         bytes[] calldata priceUpdateData
     ) external payable nonReentrant {
         LPInfo storage lpData = lpInfo[lp];
@@ -541,6 +542,14 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         require(
             verifier.verifyProof(proof, publicSignals),
             "Invalid ZK proof"
+        );
+        
+        // CRITICAL SECURITY CHECK: Verify that R_x from proof matches transaction public key
+        // publicSignals[1] = R_x (transaction public key x-coordinate from user's secret key r)
+        // This prevents users from minting Monero they don't own
+        require(
+            publicSignals[1] == uint256(txPublicKey),
+            "Transaction public key mismatch - user does not own this Monero"
         );
         
         // Verify TX exists in Monero block via Merkle proof

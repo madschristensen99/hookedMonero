@@ -194,6 +194,7 @@ contract MintRelayer is EIP712, ReentrancyGuard {
         uint256 txIndex,
         bytes32[] calldata outputMerkleProof,
         uint256 outputIndex,
+        bytes32 txPublicKey,
         bytes[] calldata priceUpdateData
     ) external payable onlyAuthorizedRelayer nonReentrant {
         // Verify intent signature
@@ -247,6 +248,7 @@ contract MintRelayer is EIP712, ReentrancyGuard {
             outputIndex,
             address(this), // Mint to relayer contract first
             intent.lp,
+            txPublicKey,  // Transaction public key for verification
             priceUpdateData
         );
         
