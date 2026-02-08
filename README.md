@@ -34,9 +34,10 @@ Hooked Monero enables trustless, privacy-preserving bridging of Monero (XMR) to 
 |----------|----------|
 | **WrappedMonero (wXMR)** | [`0x84F8Eb0DE81B1f8422Acbd887BeE2Ee982182d41`](https://sepolia.uniscan.xyz/address/0x84F8Eb0DE81B1f8422Acbd887BeE2Ee982182d41) |
 | **PlonkVerifier** | [`0x93839A57343B1Ce1a35227d7bbA9eCC055be172d`](https://sepolia.uniscan.xyz/address/0x93839A57343B1Ce1a35227d7bbA9eCC055be172d) |
-| **MockWstETH** | [`0x32b96Af6CAE11D7b480a7cDfD79C34ddFaEDa5D3`](https://sepolia.uniscan.xyz/address/0x32b96Af6CAE11D7b480a7cDfD79C34ddFaEDa5D3) |
 
-**Frontend**: [Live Demo](https://your-frontend-url.com) _(if deployed)_
+**Frontend**: [https://zeroxmr.com/hooked/index.html](https://zeroxmr.com/hooked/index.html)
+
+**Example**: [Privately Funded Address](https://sepolia.uniscan.xyz/address/0x6E9f163085EDaF15584F13e9D156FE70b5AEb825#tokentxns) - Fresh address anonymously funded with wXMR
 
 ## 📁 Project Structure
 
