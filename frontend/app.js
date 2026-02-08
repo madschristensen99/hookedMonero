@@ -653,6 +653,9 @@ async function loadInitialData() {
         lpSelect.innerHTML = '<option value="">Error loading LPs</option>';
         burnLpSelect.innerHTML = '<option value="">Error loading LPs</option>';
     }
+    
+    // Also reload user balance
+    await loadUserData();
 }
 
 async function loadUserData() {
@@ -660,13 +663,16 @@ async function loadUserData() {
     
     try {
         // Load user balance
+        console.log('📊 Loading balance for:', state.userAddress);
         const balance = await state.publicClient.readContract({
             address: CONFIG.CONTRACT_ADDRESS,
             abi: CONTRACT_ABI,
             functionName: 'balanceOf',
             args: [state.userAddress]
         });
+        console.log('📊 Raw balance:', balance.toString());
         const balanceXMR = formatUnits(balance, 12);
+        console.log('📊 Balance in XMR:', balanceXMR);
         document.getElementById('userBalance').textContent = parseFloat(balanceXMR).toFixed(4) + ' XMR';
         document.getElementById('burnBalance').textContent = parseFloat(balanceXMR).toFixed(4);
         
@@ -956,9 +962,6 @@ async function loadLPInfo() {
             document.getElementById('lpCurrentMintFee').textContent = (Number(mintFeeBps) / 100).toFixed(2) + '%';
             document.getElementById('lpCurrentBurnFee').textContent = (Number(burnFeeBps) / 100).toFixed(2) + '%';
             document.getElementById('lpCurrentMoneroAddress').textContent = moneroAddress;
-            
-            // Set checkbox state
-            document.getElementById('lpActiveToggle').checked = active;
             
             // Set placeholders with current values
             document.getElementById('lpUpdateMintFee').placeholder = `Current: ${mintFeeBps} bps`;
@@ -1288,8 +1291,8 @@ async function requestBurn() {
         return;
     }
     
-    // Validate Monero address (basic check)
-    if (!xmrAddress.startsWith('4') || xmrAddress.length < 95) {
+    // Validate Monero address (basic check - mainnet starts with 4, subaddress with 8)
+    if ((!xmrAddress.startsWith('4') && !xmrAddress.startsWith('8')) || xmrAddress.length < 95) {
         showToast('Invalid Monero address', 'error');
         return;
     }
@@ -1488,13 +1491,42 @@ async function updateLPSettings() {
     }
     
     try {
-        // Get current LP info first
-        const currentLpInfo = await state.publicClient.readContract({
+        // Get current LP info first (using simplified ABI to avoid viem struct decoding issues)
+        const currentLpInfoRaw = await state.publicClient.readContract({
             address: CONFIG.CONTRACT_ADDRESS,
-            abi: CONTRACT_ABI,
+            abi: [{
+                inputs: [{ name: 'lp', type: 'address' }],
+                name: 'lpInfo',
+                outputs: [
+                    { name: 'collateralAmount', type: 'uint256' },
+                    { name: 'backedAmount', type: 'uint256' },
+                    { name: 'mintFeeBps', type: 'uint256' },
+                    { name: 'burnFeeBps', type: 'uint256' },
+                    { name: 'intentDepositBps', type: 'uint256' },
+                    { name: 'moneroAddress', type: 'string' },
+                    { name: 'privateViewKey', type: 'bytes32' },
+                    { name: 'active', type: 'bool' },
+                    { name: 'registered', type: 'bool' }
+                ],
+                stateMutability: 'view',
+                type: 'function'
+            }],
             functionName: 'lpInfo',
             args: [state.userAddress]
         });
+        
+        // Map array response to object
+        const currentLpInfo = {
+            collateralAmount: currentLpInfoRaw[0],
+            backedAmount: currentLpInfoRaw[1],
+            mintFeeBps: currentLpInfoRaw[2],
+            burnFeeBps: currentLpInfoRaw[3],
+            intentDepositBps: currentLpInfoRaw[4],
+            moneroAddress: currentLpInfoRaw[5],
+            privateViewKey: currentLpInfoRaw[6],
+            active: currentLpInfoRaw[7],
+            registered: currentLpInfoRaw[8]
+        };
         
         if (!currentLpInfo.registered) {
             showToast('You are not registered as an LP', 'error');
@@ -1506,7 +1538,7 @@ async function updateLPSettings() {
         const newBurnFee = document.getElementById('lpUpdateBurnFee').value || currentLpInfo.burnFeeBps.toString();
         const newMoneroAddress = document.getElementById('lpUpdateMoneroAddress').value || currentLpInfo.moneroAddress;
         const newPrivateViewKey = document.getElementById('lpUpdatePrivateViewKey').value || currentLpInfo.privateViewKey;
-        const newActive = document.getElementById('lpActiveToggle').checked;
+        const newActive = true; // LPs are always active
         
         // Validate private view key format if provided
         let viewKeyHex = newPrivateViewKey;
@@ -1527,7 +1559,7 @@ async function updateLPSettings() {
             address: CONFIG.CONTRACT_ADDRESS,
             abi: CONTRACT_ABI,
             functionName: 'registerLP',
-            args: [BigInt(newMintFee), BigInt(newBurnFee), newMoneroAddress, viewKeyHex, newActive],
+            args: [BigInt(newMintFee), BigInt(newBurnFee), currentLpInfo.intentDepositBps, newMoneroAddress, viewKeyHex, newActive],
             gas: 500000n
         });
         
