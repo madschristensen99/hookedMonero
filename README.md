@@ -1,41 +1,42 @@
 # 🌉 Hooked Monero
 
-> **🎉 COMPLETE SUCCESS!** First end-to-end private mint completed Feb 7, 2026  
-> **Private Mint TX**: [View on Uniscan](https://sepolia.uniscan.xyz/tx/0xca7c6e7079d64f0b6ff91ef41a2a18a1a1efd36d4f5ec08908a16571a00f1330)  
-> **Fresh Address**: [View tokens](https://sepolia.uniscan.xyz/address/0x6E9f163085EDaF15584F13e9D156FE70b5AEb825#tokentxns) - Anonymously funded with complete privacy!
+**A privacy-preserving bridge bringing Monero to Ethereum using zero-knowledge proofs.**
 
-A privacy-preserving bridge for Monero (XMR) to Ethereum using zero-knowledge proofs (PLONK).
+Hooked Monero enables trustless, privacy-preserving bridging of Monero (XMR) to Ethereum and EVM chains. Users prove ownership of Monero transactions through PLONK zero-knowledge proofs without revealing sensitive transaction details on-chain.
 
-## 🎯 Overview
+## ✨ Key Features
 
-**Hooked Monero** enables trustless bridging of Monero to Ethereum while preserving transaction privacy through zero-knowledge proofs. Users can prove ownership of Monero transactions and decrypt amounts without revealing sensitive cryptographic details on-chain.
+### Core Technology
+- **Zero-Knowledge Proofs**: PLONK proofs (~1,167 constraints) verify Monero transaction ownership
+- **Browser-Based Proof Generation**: Full ZK proof generation in-browser using snarkjs
+- **Cryptographic Amount Verification**: Decentralized amount decryption using LP private view keys
+- **Merkle Proof Verification**: On-chain verification of transaction and output inclusion
+- **Ed25519 & DLEQ Proofs**: Monero-compatible elliptic curve operations
 
-### Key Features
+### Privacy & Security
+- **Transaction Public Key Verification**: Prevents unauthorized minting of others' Monero
+- **Double-Spend Prevention**: On-chain tracking of used outputs
+- **Collateralized Liquidity**: LPs provide wstETH collateral with 150% safe ratio
+- **Yield-Bearing Backing**: Automatic staking rewards on LP collateral
 
-- ✅ **End-to-End Minting**: Full flow from Monero TX → ZK proof → Token mint working!
-- ✅ **Privacy-Preserving**: ZK proofs verify Monero ownership without revealing transaction details
-- ✅ **Privacy Relayer System**: ERC-4337 style relayers for anonymous minting to fresh addresses
-- ✅ **PrivacySwap Hook**: Uniswap v4 hook for atomic wXMR → any token swaps with complete privacy
-- ✅ **LP-Based Model**: Decentralized liquidity providers back wrapped tokens
-- ✅ **Yield-Bearing Collateral**: LPs use wstETH for automatic yield generation
-- ✅ **PLONK Proofs**: Efficient ZK-SNARKs with ~1,167 constraints
-- ✅ **Amount Verification**: Cryptographic amount decryption using LP's private view key
-- ✅ **Merkle Proof Verification**: TX and output inclusion proofs verified on-chain
-- ⚠️ **In Progress**: Pyth Network oracle integration for XMR/ETH prices
+### User Experience
+- **Decentralized LP Network**: Multiple liquidity providers with competitive fees
+- **Flexible Minting**: Support for mainnet addresses and subaddresses
+- **Real-Time Oracle**: Monero blockchain data posted on-chain for verification
+- **Web Interface**: Complete frontend for minting, burning, and LP management
 
-## 🚀 Deployed Contracts (Unichain Sepolia Testnet)
+## 🚀 Live Deployment
 
-| Contract | Address | Explorer |
-|----------|---------|----------|
-| **WrappedMonero (wXMR)** | `0x1aFE6c215A3b7136dA30c405C436f668f3dec4BA` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x1aFE6c215A3b7136dA30c405C436f668f3dec4BA) |
-| **MintRelayer** | `0xbF9Aff472b81D36971b3328f79fA661610fE8675` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0xbF9Aff472b81D36971b3328f79fA661610fE8675) |
-| **PrivacySwapHook** | `0x9CB59aa20ca57b4659007d1612068c81A518c0c0` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x9CB59aa20ca57b4659007d1612068c81A518c0c0) |
-| **PlonkVerifier** | `0x1ed5BfabBd944e5417Eab5c3C1A64173C5eDa93F` | [View on Uniscan](https://sepolia.uniscan.xyz/address/0x1ed5BfabBd944e5417Eab5c3C1A64173C5eDa93F) |
-| **Private Mint TX** | - | [View on Uniscan](https://sepolia.uniscan.xyz/tx/0xca7c6e7079d64f0b6ff91ef41a2a18a1a1efd36d4f5ec08908a16571a00f1330) |
-| **Fresh Address (Example)** | `0x6E9f163085EDaF15584F13e9D156FE70b5AEb825` | [View tokens](https://sepolia.uniscan.xyz/address/0x6E9f163085EDaF15584F13e9D156FE70b5AEb825#tokentxns) |
-
-**Network**: Unichain Sepolia (Chain ID: 1301)  
+**Network**: Unichain Sepolia Testnet (Chain ID: 1301)  
 **RPC**: https://sepolia.unichain.org
+
+| Contract | Address |
+|----------|----------|
+| **WrappedMonero (wXMR)** | [`0x84F8Eb0DE81B1f8422Acbd887BeE2Ee982182d41`](https://sepolia.uniscan.xyz/address/0x84F8Eb0DE81B1f8422Acbd887BeE2Ee982182d41) |
+| **PlonkVerifier** | [`0x93839A57343B1Ce1a35227d7bbA9eCC055be172d`](https://sepolia.uniscan.xyz/address/0x93839A57343B1Ce1a35227d7bbA9eCC055be172d) |
+| **MockWstETH** | [`0x32b96Af6CAE11D7b480a7cDfD79C34ddFaEDa5D3`](https://sepolia.uniscan.xyz/address/0x32b96Af6CAE11D7b480a7cDfD79C34ddFaEDa5D3) |
+
+**Frontend**: [Live Demo](https://your-frontend-url.com) _(if deployed)_
 
 ## 📁 Project Structure
 
@@ -189,60 +190,74 @@ npm run verify
 
 ## 📖 How It Works
 
-### For Liquidity Providers (LPs)
+### Minting (Monero → Ethereum)
 
-1. **Register**: Set mint/burn fees and activate LP status
-2. **Deposit Collateral**: Deposit ETH (converted to wstETH)
-3. **Earn Fees**: Receive fees from mints/burns
-4. **Earn Yield**: wstETH collateral generates staking rewards
+1. **Send Monero**: Transfer XMR to a liquidity provider's Monero address
+2. **Generate Proof**: Browser generates ZK proof of transaction ownership
+   - Proves knowledge of transaction secret key `r`
+   - Verifies `R = r·G` matches transaction public key
+   - Decrypts and verifies amount using LP's view key
+   - Generates Merkle proofs for transaction and output inclusion
+3. **Submit On-Chain**: Contract verifies all proofs and mints wrapped XMR
+4. **Receive Tokens**: Get wXMR (ERC-20) in your Ethereum wallet
 
-### For Users
+### Burning (Ethereum → Monero)
 
-#### Minting zeroXMR
+1. **Request Burn**: Submit burn request with destination Monero address
+2. **Tokens Locked**: wXMR locked in contract
+3. **LP Fulfills**: Liquidity provider sends XMR to your Monero address
+4. **Completion**: Burn finalized after oracle confirmation
 
-1. Create mint intent with anti-griefing deposit
-2. Send XMR to LP's Monero address
-3. Generate ZK proof of transaction ownership
-4. Submit proof to contract → receive zeroXMR
+### For Liquidity Providers
 
-#### Burning zeroXMR
-
-1. Request burn with XMR destination address
-2. zeroXMR tokens locked in contract
-3. LP sends XMR within 2 hours
-4. Oracle confirms → burn complete
-5. If LP fails → claim LP collateral
+1. **Register**: Set fees and provide Monero address + private view key
+2. **Deposit Collateral**: Lock wstETH (minimum 150% collateralization)
+3. **Earn Fees**: Collect fees from mints and burns
+4. **Earn Yield**: Automatic staking rewards on wstETH collateral
 
 ## 🔐 Security
 
-### Cryptographic Components
+### Cryptographic Guarantees
 
-- **ZK Proofs**: PLONK with ~1,167 constraints
-- **Ed25519**: Monero's elliptic curve cryptography
-- **DLEQ Proofs**: Discrete log equality proofs
-- **Poseidon Hash**: ZK-friendly commitment scheme
+- **PLONK Zero-Knowledge Proofs**: ~1,167 constraints verify transaction ownership
+- **Transaction Public Key Matching**: Prevents minting of others' Monero
+- **Ed25519 Operations**: Native Monero elliptic curve cryptography
+- **DLEQ Proofs**: Discrete logarithm equality verification
+- **Poseidon Commitments**: ZK-friendly binding of private inputs
+- **Merkle Proofs**: Cryptographic proof of transaction inclusion
 
-### Collateralization
+### Economic Security
 
-- **Safe Ratio**: 150% (LPs can accept mints)
-- **Risk Zone**: 120-150% (no new mints)
-- **Liquidation**: <120% (anyone can liquidate)
+**Collateralization Tiers:**
+- **Safe Zone** (≥150%): LPs can accept new mints
+- **Warning Zone** (120-150%): No new mints allowed
+- **Liquidation** (<120%): Collateral can be claimed
 
-### Oracle Trust
+**Oracle System:**
+- Rust-based oracle posts Monero block data on-chain
+- Merkle roots enable trustless verification
+- Future: Decentralized oracle network
 
-- **Pyth Network**: Decentralized price feeds
-- **Transaction Oracle**: Confirms Monero transactions (can be decentralized)
+### Security Considerations
 
-⚠️ **WARNING**: This is experimental software. NOT audited for production use.
+⚠️ **This is experimental software for research purposes.**
+
+- Not audited by professional security firms
+- Not recommended for production use with real funds
+- Testnet deployment only
+- Use at your own risk
 
 ## 📚 Documentation
 
-- [Circuit Documentation](circuit/README.md) - Circom circuit details
-- [Contract Documentation](contracts/README.md) - Solidity contract details
-- [Privacy Relayer System](RELAYER_README.md) - Gasless private minting with EIP-712 intents
-- [PrivacySwap Hook](PRIVACY_SWAP_README.md) - Private token acquisition via Uniswap v4
-- [Pyth Network Docs](https://docs.pyth.network/) - Oracle integration
-- [PLONK Paper](https://eprint.iacr.org/2019/953) - ZK proof system
+### Project Documentation
+- [Circuit Documentation](circuit/README.md) - Circom circuit implementation
+- [Contract Documentation](contracts/README.md) - Solidity smart contracts
+
+### External Resources
+- [PLONK Paper](https://eprint.iacr.org/2019/953) - Zero-knowledge proof system
+- [Monero Documentation](https://www.getmonero.org/resources/developer-guides/) - Monero cryptography
+- [Circom Documentation](https://docs.circom.io/) - Circuit development
+- [snarkjs](https://github.com/iden3/snarkjs) - ZK proof generation library
 
 ## 🧪 Testing
 
@@ -250,20 +265,21 @@ npm run verify
 # Run contract tests
 npm test
 
-# Test Pyth oracle integration
-npx hardhat run scripts/test-pyth.js --network unichain_testnet
+# Test circuit compilation
+cd circuit && ./compile.sh
+
+# Test proof generation
+node scripts/proofGeneration/generate_proof_and_mint.js
 ```
 
-## 🚧 Roadmap
+## 🔮 Future Enhancements
 
-- [ ] Mainnet deployment
-- [ ] Decentralized oracle network
-- [ ] Multi-LP support with routing
-- [ ] Subaddress support
-- [ ] Ring signature verification
-- [ ] Security audit
-- [ ] Frontend dApp
-- [ ] Cross-chain support (other L2s)
+- Decentralized oracle network for Monero block data
+- Multi-chain deployment (Arbitrum, Optimism, Base)
+- Advanced Monero features (ring signatures, stealth addresses)
+- Professional security audit
+- Mainnet deployment
+- Enhanced LP routing and fee optimization
 
 ## 🤝 Contributing
 
@@ -277,13 +293,16 @@ Contributions welcome! This is experimental research software.
 
 ## ⚠️ Disclaimer
 
-**EXPERIMENTAL SOFTWARE - NOT AUDITED**
+**EXPERIMENTAL RESEARCH SOFTWARE**
 
-This software is provided "as is" without warranty of any kind. Do not use with real funds without:
-- Professional security audit
-- Formal verification
-- Extensive testing
-- Legal review
+This software is provided "as is" for research and educational purposes only. It has not been audited and should not be used in production with real funds. The developers assume no liability for any losses incurred through the use of this software.
+
+Before any production deployment, this system requires:
+- Professional security audit by qualified firms
+- Formal verification of critical components
+- Extensive testing on testnets
+- Legal and regulatory review
+- Community review and feedback
 
 ## 📄 License
 
@@ -291,10 +310,10 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ## 🔗 Links
 
-- **Testnet Deployment**: [Uniscan](https://sepolia.uniscan.xyz/address/0xCE92E887d225D06c21a16d845D88E980d536FA2b)
 - **GitHub**: [madschristensen99/hookedMonero](https://github.com/madschristensen99/hookedMonero)
-- **Unichain**: [docs.unichain.org](https://docs.unichain.org/)
-- **Pyth Network**: [pyth.network](https://pyth.network/)
+- **Unichain Docs**: [docs.unichain.org](https://docs.unichain.org/)
+- **Monero**: [getmonero.org](https://www.getmonero.org/)
+- **Circom**: [docs.circom.io](https://docs.circom.io/)
 
 ---
 
