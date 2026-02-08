@@ -56,9 +56,9 @@ async function main() {
   
   const mintFeeBps = 50;  // 0.5%
   const burnFeeBps = 50;  // 0.5%
-  const moneroAddress = "8BuPi2eetgmHxeqirYnrGMQYMTphDviL88ZkfJTACce95Ta48bmAwd9RKmai5nBA7rShtLadXcKwBT8PSjdyo5P4PgAPT23";
-  // Example private view key (32 bytes) - REPLACE WITH YOUR ACTUAL PRIVATE VIEW KEY
-  const privateViewKey = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const moneroAddress = "8A7nWi3ujDjBuqZuUUXtcYfrGJ9DGHkAF1nVgotTidipZnmtnQXgjeXRQyUgPTA1Vy6GLwnMKMLvxahyhnYejGtBFqHrCbD";
+  // LP's actual Monero private view key
+  const privateViewKey = "0x0ca8606d02e81ddd102068ae432e00a2510c07f531df440af886788139c3dd04";
   const active = true;
 
   console.log("Configuration:");
@@ -69,7 +69,8 @@ async function main() {
   console.log("");
 
   try {
-    const tx = await WrappedMonero.registerLP(mintFeeBps, burnFeeBps, moneroAddress, privateViewKey, active);
+    const intentDepositBps = 100; // 1% intent deposit
+    const tx = await WrappedMonero.registerLP(mintFeeBps, burnFeeBps, intentDepositBps, moneroAddress, privateViewKey, active);
     console.log("  TX:", tx.hash);
     await tx.wait();
     console.log("✓ Registered as LP\n");

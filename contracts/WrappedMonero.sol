@@ -580,6 +580,32 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         // Get amount from public signals
         uint256 v = publicSignals[0];
         
+        // Validate mint intent
+        bytes32 intentId = keccak256(abi.encodePacked(recipient, lp, v, block.timestamp / 1 days));
+        MintIntent storage intent = mintIntents[intentId];
+        
+        // Try to find a valid intent for this user/LP/amount within the last 7 days
+        bool foundIntent = false;
+        for (uint256 i = 0; i < 7 && !foundIntent; i++) {
+            bytes32 testIntentId = keccak256(abi.encodePacked(recipient, lp, v, (block.timestamp / 1 days) - i));
+            MintIntent storage testIntent = mintIntents[testIntentId];
+            if (testIntent.user == recipient && !testIntent.fulfilled && !testIntent.cancelled) {
+                intentId = testIntentId;
+                intent = testIntent;
+                foundIntent = true;
+            }
+        }
+        
+        require(foundIntent, "No valid mint intent found");
+        require(intent.user == recipient, "Intent user mismatch");
+        require(intent.lp == lp, "Intent LP mismatch");
+        require(!intent.fulfilled, "Intent already fulfilled");
+        require(!intent.cancelled, "Intent cancelled");
+        require(v == intent.expectedAmount, "Amount does not match intent");
+        
+        // Mark intent as fulfilled
+        intent.fulfilled = true;
+        
         // Prevent double-spending
         bytes32 outputId = keccak256(abi.encodePacked(output.txHash, output.outputIndex));
         require(!usedOutputs[outputId], "Output spent");

@@ -35,7 +35,7 @@ import * as ed from 'https://cdn.jsdelivr.net/npm/@noble/ed25519@1.7.3/+esm';
 const CONFIG = {
     CHAIN_ID: 1301, // Unichain Sepolia
     RPC_URL: 'https://sepolia.unichain.org',
-    CONTRACT_ADDRESS: '0x84F8Eb0DE81B1f8422Acbd887BeE2Ee982182d41', // Secure deployment with TX pubkey verification
+    CONTRACT_ADDRESS: '0xC67Cf54d14078ff2968b4Fcd55331C48CEf69eeF', // With mint intent validation
     EXPLORER_URL: 'https://sepolia.uniscan.xyz',
     PICONERO_PER_XMR: 1e12,
 };
@@ -1666,20 +1666,33 @@ async function computeOutputMerkleProof(blockHeight, txHash, outputIndex) {
     const allTxHashes = blockData.result.tx_hashes || [];
     console.log(`  Block has ${allTxHashes.length} transactions`);
     
-    // 2. Fetch all transactions to get outputs
-    const txResponse = await fetch('https://corsproxy.io/?' + encodeURIComponent('http://xmr.privex.io:18081/get_transactions'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            txs_hashes: allTxHashes,
-            decode_as_json: true
-        })
-    });
+    // 2. Fetch all transactions in batches to avoid 413 error
+    const BATCH_SIZE = 20;
+    const allTransactions = [];
     
-    const txData = await txResponse.json();
-    if (txData.status !== 'OK') {
-        throw new Error('Failed to fetch transactions');
+    for (let i = 0; i < allTxHashes.length; i += BATCH_SIZE) {
+        const batch = allTxHashes.slice(i, i + BATCH_SIZE);
+        console.log(`  Fetching batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(allTxHashes.length / BATCH_SIZE)} (${batch.length} TXs)...`);
+        
+        const txResponse = await fetch('https://corsproxy.io/?' + encodeURIComponent('http://xmr.privex.io:18081/get_transactions'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                txs_hashes: batch,
+                decode_as_json: true
+            })
+        });
+        
+        const txData = await txResponse.json();
+        if (txData.status !== 'OK') {
+            throw new Error(`Failed to fetch transaction batch ${Math.floor(i / BATCH_SIZE) + 1}`);
+        }
+        
+        allTransactions.push(...txData.txs);
     }
+    
+    console.log(`  Fetched ${allTransactions.length} transactions total`);
+    const txData = { txs: allTransactions };
     
     // 3. Build list of all outputs with their global indices
     const allOutputs = [];
@@ -1954,7 +1967,12 @@ function decryptAmount(ecdhAmount, H_s_hex) {
         ecdhHex = '0'.repeat(16); // 8 bytes = 16 hex chars
     }
     ecdhHex = ecdhHex.replace(/^0x/, '');
-    if (ecdhHex.length < 16) {
+    
+    // For RCT type 6 (CLSAG), ecdhAmount is 32 bytes but amount is in the LAST 8 bytes
+    // Take the last 16 hex characters (8 bytes)
+    if (ecdhHex.length > 16) {
+        ecdhHex = ecdhHex.slice(-16); // Last 8 bytes
+    } else if (ecdhHex.length < 16) {
         ecdhHex = ecdhHex.padStart(16, '0');
     }
     

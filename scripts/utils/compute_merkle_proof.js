@@ -171,9 +171,10 @@ async function computeOutputMerkleProof(blockHeight, txHash, outputIndex) {
             const commitment = outPk[i] || '0'.repeat(64);
             
             // Create output data matching oracle format
+            // IMPORTANT: Use GLOBAL output index, not local index i
             const outputData = {
                 txHash: '0x' + currentTxHash,
-                outputIndex: i,
+                outputIndex: currentGlobalIndex,  // Use global index!
                 ecdhAmount: '0x' + ecdhAmount.padStart(64, '0'),
                 outputPubKey: '0x' + outputPubKey,
                 commitment: '0x' + commitment
