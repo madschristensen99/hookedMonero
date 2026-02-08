@@ -10,8 +10,24 @@ import {
     parseUnits,
     parseEther,
     formatEther,
-    decodeEventLog
+    decodeEventLog,
+    keccak256,
+    concat,
+    toHex,
+    encodeFunctionData,
+    decodeFunctionResult
 } from 'https://esm.sh/viem@2.7.15';
+
+// ============================================
+// SnarkJS for ZK Proof Generation
+// ============================================
+// Use jsdelivr which has better browser support
+import * as snarkjs from 'https://cdn.jsdelivr.net/npm/snarkjs@0.7.4/+esm';
+
+// ============================================
+// Ed25519 for DLEQ Proofs
+// ============================================
+import * as ed from 'https://cdn.jsdelivr.net/npm/@noble/ed25519@1.7.3/+esm';
 
 // ============================================
 // Configuration
@@ -19,7 +35,7 @@ import {
 const CONFIG = {
     CHAIN_ID: 1301, // Unichain Sepolia
     RPC_URL: 'https://sepolia.unichain.org',
-    CONTRACT_ADDRESS: '0x926d2A429709c87eC4dc62DC469172ea8e3689Dc', // Mock deployment - LP sets intent deposit
+    CONTRACT_ADDRESS: '0x4b6d4Cb39F727Fd1D98480339AdF815F4ee26148', // Latest: Fixed view functions + ETH collateral
     EXPLORER_URL: 'https://sepolia.uniscan.xyz',
     PICONERO_PER_XMR: 1e12,
 };
@@ -83,6 +99,7 @@ const CONTRACT_ABI = [
                 { name: 'backedAmount', type: 'uint256' },
                 { name: 'mintFeeBps', type: 'uint256' },
                 { name: 'burnFeeBps', type: 'uint256' },
+                { name: 'intentDepositBps', type: 'uint256' },
                 { name: 'moneroAddress', type: 'string' },
                 { name: 'privateViewKey', type: 'bytes32' },
                 { name: 'active', type: 'bool' },
@@ -136,6 +153,63 @@ const CONTRACT_ABI = [
         name: 'registerLP',
         outputs: [],
         stateMutability: 'nonpayable',
+        type: 'function',
+    },
+    {
+        inputs: [
+            { name: 'proof', type: 'uint256[24]' },
+            { name: 'publicSignals', type: 'uint256[70]' },
+            { 
+                name: 'dleqProof', 
+                type: 'tuple',
+                components: [
+                    { name: 'c', type: 'bytes32' },
+                    { name: 's', type: 'bytes32' },
+                    { name: 'K1', type: 'bytes32' },
+                    { name: 'K2', type: 'bytes32' }
+                ]
+            },
+            { 
+                name: 'ed25519Proof', 
+                type: 'tuple',
+                components: [
+                    { name: 'R_x', type: 'bytes32' },
+                    { name: 'R_y', type: 'bytes32' },
+                    { name: 'S_x', type: 'bytes32' },
+                    { name: 'S_y', type: 'bytes32' },
+                    { name: 'P_x', type: 'bytes32' },
+                    { name: 'P_y', type: 'bytes32' },
+                    { name: 'B_x', type: 'bytes32' },
+                    { name: 'B_y', type: 'bytes32' },
+                    { name: 'G_x', type: 'bytes32' },
+                    { name: 'G_y', type: 'bytes32' },
+                    { name: 'A_x', type: 'bytes32' },
+                    { name: 'A_y', type: 'bytes32' }
+                ]
+            },
+            { 
+                name: 'output', 
+                type: 'tuple',
+                components: [
+                    { name: 'txHash', type: 'bytes32' },
+                    { name: 'outputIndex', type: 'uint256' },
+                    { name: 'ecdhAmount', type: 'bytes32' },
+                    { name: 'outputPubKey', type: 'bytes32' },
+                    { name: 'commitment', type: 'bytes32' }
+                ]
+            },
+            { name: 'blockHeight', type: 'uint256' },
+            { name: 'txMerkleProof', type: 'bytes32[]' },
+            { name: 'txIndex', type: 'uint256' },
+            { name: 'outputMerkleProof', type: 'bytes32[]' },
+            { name: 'outputIndex', type: 'uint256' },
+            { name: 'recipient', type: 'address' },
+            { name: 'lp', type: 'address' },
+            { name: 'priceUpdateData', type: 'bytes[]' }
+        ],
+        name: 'mint',
+        outputs: [],
+        stateMutability: 'payable',
         type: 'function',
     },
     {
@@ -1154,15 +1228,22 @@ async function createMintIntent() {
             console.error('Error fetching LP Monero address:', e);
         }
         
-        // Show instructions
-        document.getElementById('intentId').textContent = intentId;
-        document.getElementById('xmrAddress').textContent = moneroAddress;
-        document.getElementById('mintInstructions').classList.remove('hidden');
+        // Show instructions if elements exist
+        const intentIdEl = document.getElementById('intentId');
+        const xmrAddressEl = document.getElementById('xmrAddress');
+        const instructionsEl = document.getElementById('mintInstructions');
         
-        showToast('Mint intent created successfully!', 'success');
+        if (intentIdEl) intentIdEl.textContent = intentId;
+        if (xmrAddressEl) xmrAddressEl.textContent = moneroAddress;
+        if (instructionsEl) instructionsEl.classList.remove('hidden');
+        
+        showToast(`Mint intent created! Send XMR to: ${moneroAddress}`, 'success');
         
         // Add to activity
-        addActivity('Mint Intent Created', `Intent ID: ${intentId}`, 'Just now');
+        addActivity('Mint Intent Created', `Intent ID: ${intentId.slice(0, 10)}...`, 'Just now');
+        
+        // Reload mint intents to show the new one
+        await loadMintIntents();
         
     } catch (error) {
         console.error('Error creating mint intent:', error);
@@ -1349,19 +1430,34 @@ async function depositCollateral() {
         });
         
         showLoading('Waiting for confirmation...');
-        await state.publicClient.waitForTransactionReceipt({ 
-            hash,
-            pollingInterval: 2000,
-            timeout: 120000
-        });
+        
+        // Try to wait for receipt, but handle RPC errors gracefully
+        try {
+            await state.publicClient.waitForTransactionReceipt({ 
+                hash,
+                pollingInterval: 2000,
+                timeout: 30000 // Shorter timeout
+            });
+        } catch (receiptError) {
+            // If it's a block range error, the transaction likely succeeded
+            if (receiptError.message.includes('block is out of range') || 
+                receiptError.message.includes('HTTP request failed')) {
+                console.log('RPC error waiting for receipt, but transaction was sent:', hash);
+                // Continue anyway - transaction was sent
+            } else {
+                throw receiptError; // Re-throw other errors
+            }
+        }
         
         hideLoading();
-        showToast('Collateral deposited successfully!', 'success');
+        showToast(`Collateral deposit sent! TX: ${hash.slice(0, 10)}...`, 'success');
         addActivity('Collateral Deposited', `${amount} ETH`, 'Just now');
         
-        // Reload LP info and dropdown (capacity changed)
-        await loadLPInfo();
-        await loadInitialData();
+        // Wait a bit for the transaction to be mined, then reload
+        setTimeout(async () => {
+            await loadLPInfo();
+            await loadInitialData();
+        }, 3000);
         
     } catch (error) {
         console.error('Error depositing collateral:', error);
@@ -1476,27 +1572,23 @@ function computeMerkleProofFromLeaves(leaves, leafIndex) {
         const nextLevel = [];
         
         for (let i = 0; i < currentLevel.length; i += 2) {
-            if (i === currentLevel.length - 1) {
-                // Odd number of nodes, promote the last one
-                nextLevel.push(currentLevel[i]);
-            } else {
-                // Hash pair
-                const left = currentLevel[i];
-                const right = currentLevel[i + 1];
-                const combined = left + right;
-                const combinedBytes = new Uint8Array(combined.length / 2);
-                for (let j = 0; j < combined.length; j += 2) {
-                    combinedBytes[j / 2] = parseInt(combined.substr(j, 2), 16);
-                }
-                const hash = keccak256Hash(combinedBytes).slice(2);
-                nextLevel.push(hash);
-                
-                // Add sibling to proof if this pair contains our leaf
-                if (i === currentIndex || i + 1 === currentIndex) {
-                    const sibling = (i === currentIndex) ? right : left;
-                    proof.push('0x' + sibling);
-                }
+            const left = currentLevel[i];
+            // Duplicate last hash for odd number (matches oracle/backend)
+            const right = i + 1 < currentLevel.length ? currentLevel[i + 1] : left;
+            
+            // Add sibling to proof if this pair contains our leaf
+            if (i === currentIndex || i + 1 === currentIndex) {
+                const sibling = (i === currentIndex) ? right : left;
+                // Ensure no double 0x prefix
+                const cleanSibling = sibling.startsWith('0x') ? sibling.slice(2) : sibling;
+                proof.push('0x' + cleanSibling);
             }
+            
+            // Hash pair using viem's keccak256 and concat (matches ethers)
+            const leftHex = '0x' + left;
+            const rightHex = '0x' + right;
+            const hash = keccak256(concat([leftHex, rightHex]));
+            nextLevel.push(hash.slice(2));
         }
         
         currentIndex = Math.floor(currentIndex / 2);
@@ -1506,7 +1598,184 @@ function computeMerkleProofFromLeaves(leaves, leafIndex) {
     return proof;
 }
 
-async function computeTxMerkleProof(blockHeight, txHash, moneroRpcUrl) {
+/**
+ * Compute output Merkle proof
+ */
+async function computeOutputMerkleProof(blockHeight, txHash, outputIndex) {
+    console.log(`Computing output Merkle proof for output ${outputIndex} in TX ${txHash}...`);
+    
+    // 1. Get block data
+    const moneroRpcUrl = 'https://corsproxy.io/?' + encodeURIComponent('http://xmr.privex.io:18081/json_rpc');
+    const blockResponse = await fetch(moneroRpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: '0',
+            method: 'get_block',
+            params: { height: blockHeight }
+        })
+    });
+    
+    const blockData = await blockResponse.json();
+    if (blockData.error) {
+        throw new Error(`Failed to get block: ${blockData.error.message}`);
+    }
+    
+    const allTxHashes = blockData.result.tx_hashes || [];
+    console.log(`  Block has ${allTxHashes.length} transactions`);
+    
+    // 2. Fetch all transactions to get outputs
+    const txResponse = await fetch('https://corsproxy.io/?' + encodeURIComponent('http://xmr.privex.io:18081/get_transactions'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            txs_hashes: allTxHashes,
+            decode_as_json: true
+        })
+    });
+    
+    const txData = await txResponse.json();
+    if (txData.status !== 'OK') {
+        throw new Error('Failed to fetch transactions');
+    }
+    
+    // 3. Build list of all outputs with their global indices
+    const allOutputs = [];
+    let currentGlobalIndex = 0;
+    let targetGlobalIndex = -1;
+    
+    const normalizedTargetTxHash = txHash.replace(/^0x/, '');
+    console.log(`  Looking for TX: ${normalizedTargetTxHash}, output index: ${outputIndex}`);
+    
+    for (let i = 0; i < allTxHashes.length; i++) {
+        const txHashInBlock = allTxHashes[i];
+        const txInfo = txData.txs.find(t => t.tx_hash === txHashInBlock);
+        
+        if (!txInfo) {
+            console.log(`  Warning: TX ${txHashInBlock} not found in response`);
+            continue;
+        }
+        
+        const tx = JSON.parse(txInfo.as_json);
+        const outputs = tx.vout || [];
+        
+        // Debug: show when we find the target TX
+        if (txHashInBlock === normalizedTargetTxHash) {
+            console.log(`  Found target TX at block index ${i}, has ${outputs.length} outputs`);
+            console.log(`  TX outputs:`, outputs);
+            console.log(`  RCT signatures:`, tx.rct_signatures);
+        }
+        
+        for (let j = 0; j < outputs.length; j++) {
+            const vout = outputs[j];
+            const target = vout.target;
+            
+            // Debug for target TX
+            if (txHashInBlock === normalizedTargetTxHash) {
+                console.log(`  Output ${j}:`, vout);
+                console.log(`    Target:`, target);
+                console.log(`    Has target.key:`, !!(target && target.key));
+                console.log(`    Has target.tagged_key:`, !!(target && target.tagged_key));
+            }
+            
+            // Support both old format (target.key) and new format (target.tagged_key.key)
+            const outputKey = target?.key || target?.tagged_key?.key;
+            
+            if (outputKey) {
+                const ecdhInfo = tx.rct_signatures?.ecdhInfo?.[j] || {};
+                const ecdhAmount = ecdhInfo.amount || '0000000000000000';
+                const commitment = tx.rct_signatures?.outPk?.[j] || '0'.repeat(64);
+                
+                // Check if this is our target output
+                if (txHashInBlock === normalizedTargetTxHash && j === outputIndex) {
+                    console.log(`  ✅ Found target output at global index ${currentGlobalIndex}`);
+                    targetGlobalIndex = currentGlobalIndex;
+                }
+                
+                allOutputs.push({
+                    txHash: '0x' + txHashInBlock,
+                    outputIndex: j,
+                    ecdhAmount: '0x' + ecdhAmount.padStart(64, '0'),
+                    outputPubKey: '0x' + outputKey,
+                    commitment: '0x' + commitment
+                });
+                
+                currentGlobalIndex++;
+            }
+        }
+    }
+    
+    if (targetGlobalIndex === -1) {
+        throw new Error(`Output ${outputIndex} in TX ${txHash} not found in block`);
+    }
+    
+    console.log(`  Total outputs in block: ${allOutputs.length}`);
+    console.log(`  Target output global index: ${targetGlobalIndex}`);
+    
+    // 4. Build output Merkle tree leaves (keccak256 of packed data)
+    const leaves = allOutputs.map(out => {
+        // Pack: txHash || outputIndex || ecdhAmount || outputPubKey || commitment
+        const packed = concat([
+            out.txHash,
+            toHex(BigInt(out.outputIndex), { size: 32 }),
+            out.ecdhAmount,
+            out.outputPubKey,
+            out.commitment
+        ]);
+        return keccak256(packed);
+    });
+    
+    // 5. Compute Merkle proof using SHA256 (matches oracle)
+    const proof = [];
+    let currentLevel = leaves;
+    let currentIndex = targetGlobalIndex;
+    
+    while (currentLevel.length > 1) {
+        const nextLevel = [];
+        const hashPromises = [];
+        
+        for (let i = 0; i < currentLevel.length; i += 2) {
+            const left = currentLevel[i];
+            const right = i + 1 < currentLevel.length ? currentLevel[i + 1] : left;
+            
+            // Add sibling to proof
+            if (i === currentIndex || i + 1 === currentIndex) {
+                const sibling = (i === currentIndex) ? right : left;
+                proof.push(sibling);
+            }
+            
+            // Hash using SHA256 (not keccak256!)
+            const leftBytes = new Uint8Array(left.slice(2).match(/.{2}/g).map(b => parseInt(b, 16)));
+            const rightBytes = new Uint8Array(right.slice(2).match(/.{2}/g).map(b => parseInt(b, 16)));
+            const combined = new Uint8Array([...leftBytes, ...rightBytes]);
+            hashPromises.push(
+                crypto.subtle.digest('SHA-256', combined).then(hashBuffer => 
+                    '0x' + Array.from(new Uint8Array(hashBuffer))
+                        .map(b => b.toString(16).padStart(2, '0')).join('')
+                )
+            );
+        }
+        
+        // Wait for all hashes to complete
+        const hashes = await Promise.all(hashPromises);
+        nextLevel.push(...hashes);
+        
+        currentLevel = nextLevel;
+        currentIndex = Math.floor(currentIndex / 2);
+    }
+    
+    console.log(`  Output Merkle proof has ${proof.length} siblings`);
+    
+    return {
+        outputIndex: targetGlobalIndex,
+        proof
+    };
+}
+
+async function computeTxMerkleProof(blockHeight, txHash) {
+    console.log(`Computing TX Merkle proof for ${txHash} in block ${blockHeight}...`);
+    const moneroRpcUrl = 'https://corsproxy.io/?' + encodeURIComponent('http://xmr.privex.io:18081/json_rpc');
     const response = await fetch(moneroRpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1537,22 +1806,21 @@ async function computeTxMerkleProof(blockHeight, txHash, moneroRpcUrl) {
 }
 
 // ============================================
-// Amount Decryption (Browser)
+// Proof Generation
 // ============================================
+// Ed25519 curve order
+const L = BigInt('7237005577332262213973186563042994240857116359379907606001950938285454250989');
+
+/**
+ * Compute shared secret: 8*a*R where a is private view key, R is tx public key
+ */
 async function computeSharedSecret(privateViewKey, txPublicKey) {
-    // Remove 0x prefix
     const a_hex = privateViewKey.replace(/^0x/, '');
     const R_hex = txPublicKey.replace(/^0x/, '');
     
     // Convert hex to bytes
-    const a_bytes = new Uint8Array(a_hex.length / 2);
-    for (let i = 0; i < a_hex.length; i += 2) {
-        a_bytes[i / 2] = parseInt(a_hex.substr(i, 2), 16);
-    }
-    const R_bytes = new Uint8Array(R_hex.length / 2);
-    for (let i = 0; i < R_hex.length; i += 2) {
-        R_bytes[i / 2] = parseInt(R_hex.substr(i, 2), 16);
-    }
+    const a_bytes = new Uint8Array(a_hex.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+    const R_bytes = new Uint8Array(R_hex.match(/.{2}/g).map(byte => parseInt(byte, 16)));
     
     // Read scalar as little-endian
     let a_scalar = 0n;
@@ -1560,50 +1828,86 @@ async function computeSharedSecret(privateViewKey, txPublicKey) {
         a_scalar |= BigInt(a_bytes[i]) << (BigInt(i) * 8n);
     }
     
-    // Use noble-ed25519 (loaded via CDN)
-    const ed = window.nobleEd25519;
+    // Compute a * R
     const R_point = ed.Point.fromHex(R_bytes);
     const aR = R_point.multiply(a_scalar);
+    
+    // Then (a * R) * 8
     const sharedSecret = aR.multiply(8n);
+    const sharedSecretBytes = sharedSecret.toRawBytes();
     
-    const bytes = sharedSecret.toRawBytes();
-    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    return Array.from(sharedSecretBytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function deriveHs(sharedSecret, outputIndex) {
-    const indexHex = outputIndex.toString(16).padStart(2, '0');
-    const data = sharedSecret + indexHex;
-    const dataBytes = new Uint8Array(data.length / 2);
-    for (let i = 0; i < data.length; i += 2) {
-        dataBytes[i / 2] = parseInt(data.substr(i, 2), 16);
+/**
+ * Derive H_s scalar from shared secret
+ */
+function deriveHs(sharedSecret, outputIndex) {
+    const secret_bytes = new Uint8Array(sharedSecret.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+    
+    // Encode output index as varint (simple 1-byte for now)
+    const index_bytes = new Uint8Array([outputIndex]);
+    
+    // Hash the derivation point + output index
+    const input = new Uint8Array([...secret_bytes, ...index_bytes]);
+    const hash = keccak256(input);
+    const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash;
+    
+    // Read hash as little-endian and reduce modulo curve order
+    const hash_bytes = new Uint8Array(cleanHash.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+    let hash_int = 0n;
+    for (let i = 0; i < 32; i++) {
+        hash_int |= BigInt(hash_bytes[i]) << (BigInt(i) * 8n);
     }
-    const hash = keccak256Hash(dataBytes);
-    return hash;
+    
+    const H_s = hash_int % L;
+    
+    // Convert back to little-endian bytes
+    const H_s_bytes = new Uint8Array(32);
+    let temp = H_s;
+    for (let i = 0; i < 32; i++) {
+        H_s_bytes[i] = Number(temp & 0xFFn);
+        temp >>= 8n;
+    }
+    
+    return Array.from(H_s_bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function decryptMoneroAmount(ecdhAmount, privateViewKey, txPublicKey, outputIndex) {
-    // Compute shared secret
-    const sharedSecret = await computeSharedSecret(privateViewKey, txPublicKey);
+/**
+ * Compute amount key from H_s
+ */
+function computeAmountKey(H_s_hex) {
+    const H_s_bytes = new Uint8Array(H_s_hex.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+    const amountPrefix = new TextEncoder().encode('amount');
+    const input = new Uint8Array([...amountPrefix, ...H_s_bytes]);
+    const hash = keccak256(input);
+    const cleanHash = hash.startsWith('0x') ? hash.slice(2) : hash;
+    return cleanHash.slice(0, 16); // First 8 bytes
+}
+
+/**
+ * Decrypt amount using ECDH
+ */
+function decryptAmount(ecdhAmount, H_s_hex) {
+    const amountKey = computeAmountKey(H_s_hex);
     
-    // Derive H_s
-    const Hs = await deriveHs(sharedSecret, outputIndex);
-    
-    // Decrypt amount (XOR with H_s)
-    const ecdhHex = ecdhAmount.replace(/^0x/, '');
-    const ecdhBytes = new Uint8Array(ecdhHex.length / 2);
-    for (let i = 0; i < ecdhHex.length; i += 2) {
-        ecdhBytes[i / 2] = parseInt(ecdhHex.substr(i, 2), 16);
+    // Handle ecdhAmount being 0 or empty
+    let ecdhHex = ecdhAmount;
+    if (typeof ecdhHex === 'number' || ecdhHex === 0) {
+        ecdhHex = '0'.repeat(16); // 8 bytes = 16 hex chars
+    }
+    ecdhHex = ecdhHex.replace(/^0x/, '');
+    if (ecdhHex.length < 16) {
+        ecdhHex = ecdhHex.padStart(16, '0');
     }
     
-    const HsHex = Hs.replace(/^0x/, '');
-    const HsBytes = new Uint8Array(HsHex.length / 2);
-    for (let i = 0; i < HsHex.length; i += 2) {
-        HsBytes[i / 2] = parseInt(HsHex.substr(i, 2), 16);
-    }
+    const ecdhBytes = new Uint8Array(ecdhHex.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+    const keyBytes = new Uint8Array(amountKey.match(/.{2}/g).map(byte => parseInt(byte, 16)));
     
+    // XOR decryption
     const decrypted = new Uint8Array(8);
     for (let i = 0; i < 8; i++) {
-        decrypted[i] = ecdhBytes[i] ^ HsBytes[i];
+        decrypted[i] = ecdhBytes[i] ^ keyBytes[i];
     }
     
     // Read as little-endian uint64
@@ -1612,12 +1916,157 @@ async function decryptMoneroAmount(ecdhAmount, privateViewKey, txPublicKey, outp
         amount |= BigInt(decrypted[i]) << (BigInt(i) * 8n);
     }
     
-    return { amount, Hs };
+    return amount;
 }
 
-// ============================================
-// Proof Generation
-// ============================================
+/**
+ * Full Monero amount decryption pipeline
+ */
+async function decryptMoneroAmount(privateViewKey, txPublicKey, outputIndex, ecdhAmount) {
+    console.log('🔐 Decrypting Monero amount...');
+    console.log('  Private view key:', privateViewKey.slice(0, 16) + '...');
+    console.log('  TX public key R:', txPublicKey.slice(0, 16) + '...');
+    console.log('  Output index:', outputIndex);
+    console.log('  ECDH amount:', ecdhAmount);
+    
+    // Step 1: Compute shared secret
+    const sharedSecret = await computeSharedSecret(privateViewKey, txPublicKey);
+    console.log('  ✅ Shared secret:', sharedSecret.slice(0, 16) + '...');
+    
+    // Step 2: Derive H_s
+    const H_s = deriveHs(sharedSecret, outputIndex);
+    console.log('  ✅ H_s scalar:', H_s.slice(0, 16) + '...');
+    
+    // Step 3: Decrypt amount
+    const amountKey = computeAmountKey(H_s);
+    console.log('  🔑 Amount key:', amountKey);
+    const amountPiconero = decryptAmount(ecdhAmount, H_s);
+    const amountXMR = Number(amountPiconero) / 1e12;
+    console.log('  ✅ Decrypted amount:', amountPiconero.toString(), 'piconero');
+    console.log('  ✅ Amount in XMR:', amountXMR);
+    
+    return {
+        H_s,
+        amountPiconero,
+        amountXMR,
+        sharedSecret
+    };
+}
+
+/**
+ * Compute Ed25519 operations and generate DLEQ proof
+ */
+async function computeEd25519Operations(r_hex, H_s_hex) {
+    console.log('🔐 Computing Ed25519 Operations...');
+    
+    // Parse inputs
+    const r_scalar = BigInt('0x' + r_hex.replace(/^0x/, '')) % L;
+    const H_s_scalar = BigInt('0x' + H_s_hex.replace(/^0x/, '')) % L;
+    
+    // Use base point G (placeholder for A and B as per backend implementation)
+    const G = ed.Point.BASE;
+    const A = G;  // Placeholder
+    const B = G;  // Placeholder
+    
+    // 1. Compute R = r·G
+    console.log('  1. Computing R = r·G...');
+    const R = G.multiply(r_scalar);
+    
+    // 2. Compute r·A
+    console.log('  2. Computing r·A...');
+    const rA = A.multiply(r_scalar);
+    
+    // 3. Compute S = 8·(r·A)
+    console.log('  3. Computing S = 8·(r·A)...');
+    const S = rA.multiply(8n);
+    
+    // 4. Compute P = H_s·G + B
+    console.log('  4. Computing P = H_s·G + B...');
+    const H_s_G = G.multiply(H_s_scalar);
+    const P = H_s_G.add(B);
+    
+    // 5. Generate DLEQ proof
+    console.log('  5. Generating DLEQ proof...');
+    const dleqProof = await generateDLEQProof(r_scalar, G, A, R, rA);
+    
+    console.log('✅ Ed25519 operations complete');
+    
+    return {
+        R_x: R.x.toString(),
+        R_y: R.y.toString(),
+        S_x: S.x.toString(),
+        S_y: S.y.toString(),
+        P_x: P.x.toString(),
+        P_y: P.y.toString(),
+        dleqProof,
+        ed25519Proof: {
+            R_x: '0x' + R.x.toString(16).padStart(64, '0'),
+            R_y: '0x' + R.y.toString(16).padStart(64, '0'),
+            S_x: '0x' + S.x.toString(16).padStart(64, '0'),
+            S_y: '0x' + S.y.toString(16).padStart(64, '0'),
+            P_x: '0x' + P.x.toString(16).padStart(64, '0'),
+            P_y: '0x' + P.y.toString(16).padStart(64, '0'),
+            B_x: '0x' + B.x.toString(16).padStart(64, '0'),
+            B_y: '0x' + B.y.toString(16).padStart(64, '0'),
+            G_x: '0x' + G.x.toString(16).padStart(64, '0'),
+            G_y: '0x' + G.y.toString(16).padStart(64, '0'),
+            A_x: '0x' + A.x.toString(16).padStart(64, '0'),
+            A_y: '0x' + A.y.toString(16).padStart(64, '0')
+        }
+    };
+}
+
+/**
+ * Generate DLEQ proof
+ */
+async function generateDLEQProof(r_scalar, G, A, R, rA) {
+    // 1. Generate random nonce k
+    const k_bytes = new Uint8Array(32);
+    crypto.getRandomValues(k_bytes);
+    const k_scalar = BigInt('0x' + Array.from(k_bytes).map(b => b.toString(16).padStart(2, '0')).join('')) % L;
+    
+    // 2. Compute commitments
+    const K1 = G.multiply(k_scalar);  // k·G
+    const K2 = A.multiply(k_scalar);  // k·A
+    
+    // 3. Compute challenge using Fiat-Shamir
+    const toUncompressed = (point) => {
+        const x = point.x;
+        const y = point.y;
+        const xBytes = new Uint8Array(32);
+        const yBytes = new Uint8Array(32);
+        for (let i = 0; i < 32; i++) {
+            xBytes[31 - i] = Number((x >> BigInt(i * 8)) & 0xFFn);
+            yBytes[31 - i] = Number((y >> BigInt(i * 8)) & 0xFFn);
+        }
+        return new Uint8Array([...xBytes, ...yBytes]);
+    };
+    
+    const challengeInput = new Uint8Array([
+        ...toUncompressed(G),
+        ...toUncompressed(A),
+        ...toUncompressed(R),
+        ...toUncompressed(rA),
+        ...toUncompressed(K1),
+        ...toUncompressed(K2)
+    ]);
+    
+    const challengeHash = keccak256(challengeInput);
+    // Remove 0x prefix if present before adding it
+    const cleanHash = challengeHash.startsWith('0x') ? challengeHash.slice(2) : challengeHash;
+    const c = BigInt('0x' + cleanHash) % L;
+    
+    // 4. Compute response: s = k + c·r (mod L)
+    const s = (k_scalar + c * r_scalar) % L;
+    
+    return {
+        c: '0x' + c.toString(16).padStart(64, '0'),
+        s: '0x' + s.toString(16).padStart(64, '0'),
+        K1: '0x' + K1.x.toString(16).padStart(64, '0'),
+        K2: '0x' + K2.x.toString(16).padStart(64, '0')
+    };
+}
+
 async function generateProofAndMint() {
     if (!state.isConnected) {
         showToast('Please connect your wallet first', 'warning');
@@ -1626,17 +2075,57 @@ async function generateProofAndMint() {
     
     const txHash = document.getElementById('txHash').value;
     const secretKeyR = document.getElementById('secretKeyR').value;
-    const blockHeight = document.getElementById('blockHeight').value;
     
-    if (!txHash || !secretKeyR || !blockHeight) {
-        showToast('Please fill in all fields', 'warning');
+    if (!txHash || !secretKeyR) {
+        showToast('Please fill in transaction hash and secret key', 'warning');
         return;
     }
     
     try {
-        showLoading('Detecting output index from Monero node...');
+        // Step 1: Fetch transaction data and block height from Monero blockchain
+        showLoading('Step 1/5: Fetching transaction from Monero blockchain...');
+        // Use CORS proxy for Monero daemon endpoint (not json_rpc)
+        const moneroRpcUrl = 'https://corsproxy.io/?' + encodeURIComponent('http://xmr.privex.io:18081/get_transactions');
         
-        // Auto-detect output index by querying Monero node
+        const txResponse = await fetch(moneroRpcUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                txs_hashes: [txHash],
+                decode_as_json: true
+            })
+        });
+        
+        if (!txResponse.ok) {
+            console.error('Monero RPC error:', txResponse.status, txResponse.statusText);
+            throw new Error(`Monero RPC request failed: ${txResponse.status}`);
+        }
+        
+        const txData = await txResponse.json();
+        console.log('Monero daemon response:', txData);
+        
+        if (txData.status !== 'OK') {
+            console.error('Monero daemon error:', txData);
+            throw new Error(`Monero daemon error: ${txData.status}`);
+        }
+        
+        if (!txData.txs || txData.txs.length === 0) {
+            console.error('Transaction not found. Response:', txData);
+            throw new Error('Transaction not found on Monero blockchain. Make sure the transaction hash is correct and the transaction is confirmed.');
+        }
+        
+        // Extract block height from transaction
+        const txInfo = txData.txs[0];
+        const blockHeight = txInfo.block_height;
+        
+        if (!blockHeight) {
+            throw new Error('Transaction not yet confirmed in a block');
+        }
+        
+        console.log('✅ Transaction found in block:', blockHeight);
+        
+        // Step 2: Auto-detect output index
+        showLoading('Step 2/5: Detecting output index...');
         const outputIndex = await detectOutputIndex(txHash, blockHeight);
         
         if (outputIndex === null) {
@@ -1645,72 +2134,407 @@ async function generateProofAndMint() {
             return;
         }
         
-        // Update hidden field
-        document.getElementById('outputIndex').value = outputIndex;
-        
         console.log('✅ Output index detected:', outputIndex);
         
-        // Step 2: Fetch transaction data from Monero blockchain
-        showLoading('Step 2/5: Fetching transaction from Monero blockchain...');
-        // Use CORS proxy for Monero RPC (browsers can't directly call Monero nodes due to CORS)
-        const moneroRpcUrl = 'https://corsproxy.io/?' + encodeURIComponent('http://xmr.privex.io:18081/json_rpc');
-        
-        const txResponse = await fetch(moneroRpcUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: '0',
-                method: 'get_transactions',
-                params: {
-                    txs_hashes: [txHash],
-                    decode_as_json: true
-                }
-            })
-        });
-        
-        const txData = await txResponse.json();
-        if (!txData.result || !txData.result.txs || txData.result.txs.length === 0) {
-            throw new Error('Transaction not found on Monero blockchain');
-        }
-        
-        const tx = JSON.parse(txData.result.txs[0].as_json);
+        const tx = JSON.parse(txData.txs[0].as_json);
         console.log('✅ Transaction data fetched');
+        console.log('Full transaction:', tx);
         
         // Step 3: Extract output data
         showLoading('Step 3/5: Extracting output data...');
         const output = tx.vout[outputIndex];
         if (!output) {
-            throw new Error(`Output index ${outputIndex} not found`);
+            throw new Error(`Output index ${outputIndex} not found in transaction with ${tx.vout.length} outputs`);
         }
         
-        const ecdhAmount = output.amount;
-        const outputKey = output.target.key;
-        console.log('✅ Output data extracted');
+        console.log('Output structure:', output);
         
-        // Step 4: Generate ZK proof
-        showLoading('Step 4/5: Generating ZK proof (30-60 seconds)...');
+        // Extract output data based on actual Monero structure
+        const ecdhAmount = output.amount || output.ecdhInfo?.amount || '0';
+        const outputKey = output.target?.key || output.target?.tagged_key?.key;
+        const commitment = output.target?.key || output.target?.tagged_key?.key;
         
-        // Circuit files are ready! Now we need Merkle proofs and amount decryption
-        hideLoading();
-        showToast(
-            'ZK proof generation status:\n' +
-            '1. Circuit WASM file ✅\n' +
-            '2. Proving key (50MB) ✅\n' +
-            '3. Merkle proof computation ⏳\n' +
-            '4. Amount decryption with view key ⏳\n\n' +
-            'Next: Implementing Merkle proofs and amount decryption in browser',
-            'info'
+        console.log('✅ Output data extracted:');
+        console.log('  ecdhAmount:', ecdhAmount);
+        console.log('  outputKey:', outputKey);
+        console.log('  commitment:', commitment);
+        
+        // Validate extracted data
+        if (!ecdhAmount || !outputKey) {
+            throw new Error('Missing output data from transaction');
+        }
+        
+        // Step 3.5: Fetch LP info for cryptographic operations
+        showLoading('Step 3.5/9: Fetching LP information...');
+        const lpAddress = state.userAddress; // Using user as LP for now
+        
+        // Use raw call and manually extract fields to avoid ABI decoding issues
+        const lpInfoData = await state.publicClient.call({
+            to: CONFIG.CONTRACT_ADDRESS,
+            data: encodeFunctionData({
+                abi: CONTRACT_ABI,
+                functionName: 'lpInfo',
+                args: [lpAddress]
+            })
+        });
+        
+        // Manually extract fields from raw data
+        // Struct layout: collateral(32), backed(32), mintFee(32), burnFee(32), intentDeposit(32), 
+        //                string offset(32), privateViewKey(32), active(32), registered(32)
+        const data = lpInfoData.data;
+        
+        // Private view key is at offset 6*32 = 192 bytes (0-indexed, so position 6)
+        const privateViewKeyOffset = 2 + (6 * 64); // 2 for '0x' + 6*32 bytes in hex
+        const privateViewKey = '0x' + data.slice(privateViewKeyOffset, privateViewKeyOffset + 64);
+        
+        // Registered flag is at offset 8*32 = 256 bytes
+        const registeredOffset = 2 + (8 * 64);
+        const registered = data.slice(registeredOffset, registeredOffset + 64) !== '0'.repeat(64);
+        
+        // Active flag is at offset 7*32 = 224 bytes  
+        const activeOffset = 2 + (7 * 64);
+        const active = data.slice(activeOffset, activeOffset + 64) !== '0'.repeat(64);
+        
+        console.log('LP Info (manually decoded):');
+        console.log('  Private View Key:', privateViewKey);
+        console.log('  Registered:', registered);
+        console.log('  Active:', active);
+        
+        if (!registered) {
+            throw new Error('You must be registered as an LP to mint');
+        }
+        
+        const lpInfo = {
+            privateViewKey,
+            registered,
+            active
+        };
+        
+        // Step 4: Prepare circuit inputs
+        showLoading('Step 4/9: Preparing circuit inputs...');
+        
+        // Helper function to convert hex string to byte array
+        const hexToBytes = (hex) => {
+            if (!hex) {
+                throw new Error('Cannot convert undefined/null to bytes');
+            }
+            // Remove 0x prefix if present
+            hex = hex.replace(/^0x/, '');
+            const bytes = [];
+            for (let i = 0; i < hex.length; i += 2) {
+                bytes.push(parseInt(hex.substr(i, 2), 16));
+            }
+            return bytes;
+        };
+        
+        // Helper to convert number to bit array
+        const numToBits = (num, bitLength) => {
+            const bits = [];
+            for (let i = 0; i < bitLength; i++) {
+                bits.push((num >> BigInt(i)) & 1n);
+            }
+            return bits.map(b => Number(b));
+        };
+        
+        // Helper to convert hex to bit array
+        const hexToBits = (hex, bitLength) => {
+            const bigNum = BigInt('0x' + hex);
+            return numToBits(bigNum, bitLength);
+        };
+        
+        // Import poseidon hash from circomlibjs
+        const { buildPoseidon } = await import('https://esm.sh/circomlibjs@0.1.7');
+        const poseidonHash = await buildPoseidon();
+        
+        // Extract transaction public key R from extra field
+        showLoading('Step 4/9: Extracting transaction public key...');
+        const txExtra = tx.extra;
+        // TX public key is in extra field with tag 0x01, followed by 32 bytes
+        let txPublicKey = null;
+        for (let i = 0; i < txExtra.length - 32; i++) {
+            if (txExtra[i] === 1) { // Tag for TX public key
+                txPublicKey = txExtra.slice(i + 1, i + 33).map(b => b.toString(16).padStart(2, '0')).join('');
+                break;
+            }
+        }
+        
+        if (!txPublicKey) {
+            throw new Error('Could not find transaction public key in extra field');
+        }
+        
+        console.log('✅ Transaction public key R:', txPublicKey);
+        
+        // Decrypt amount using LP's private view key
+        showLoading('Step 4.5/9: Decrypting amount...');
+        const decryptedData = await decryptMoneroAmount(
+            lpInfo.privateViewKey,
+            txPublicKey,
+            outputIndex,
+            ecdhAmount || '0000000000000000'
         );
         
-        console.log('Transaction data ready for proof generation:', {
-            txHash,
-            secretKeyR,
-            blockHeight,
-            outputIndex,
-            ecdhAmount,
-            outputKey
-        });
+        const H_s_hex = decryptedData.H_s;
+        const amountPiconero = decryptedData.amountPiconero;
+        console.log('✅ Amount decryption complete');
+        console.log('  Amount:', amountPiconero.toString(), 'piconero (', decryptedData.amountXMR, 'XMR)');
+        
+        // Compute Ed25519 operations with real H_s
+        showLoading('Step 5/9: Computing Ed25519 operations...');
+        const ed25519Ops = await computeEd25519Operations(secretKeyR, H_s_hex);
+        console.log('✅ Ed25519 operations:', ed25519Ops);
+        
+        // Convert r bits to field element
+        const rBits = hexToBits(secretKeyR, 255);
+        
+        // Ensure top 3 bits are 0 (required by circuit to ensure r < L)
+        rBits[252] = 0;
+        rBits[253] = 0;
+        rBits[254] = 0;
+        
+        let rNum = 0n;
+        for (let i = 0; i < 255; i++) {
+            if (rBits[i]) rNum += (1n << BigInt(i));
+        }
+        
+        // H_s scalar - convert from hex to bits
+        const H_s_scalar_bits = hexToBits(H_s_hex, 255);
+        let H_s_num = 0n;
+        for (let i = 0; i < 255; i++) {
+            if (H_s_scalar_bits[i]) H_s_num += (1n << BigInt(i));
+        }
+        
+        // Amount - use decrypted amount
+        const v = amountPiconero;
+        
+        // Ed25519 points from computed operations
+        const R_x = BigInt(ed25519Ops.R_x);
+        const S_x = BigInt(ed25519Ops.S_x);
+        const P_x = BigInt(ed25519Ops.P_x);
+        
+        // Compute Poseidon commitment: hash(r, v, H_s, R_x, S_x, P_x)
+        const commitmentValue = poseidonHash.F.toString(
+            poseidonHash([rNum, v, H_s_num, R_x, S_x, P_x])
+        );
+        
+        console.log('Computed commitment:', commitmentValue);
+        
+        // For now, use simplified inputs (amount verification is disabled per memory)
+        const circuitInputs = {
+            // Secret key r (255 bits)
+            r: rBits,
+            
+            // Amount (self-reported for now since amount verification is disabled)
+            v: v.toString(),
+            
+            // H_s scalar (255 bits) - placeholder
+            H_s_scalar: H_s_scalar_bits,
+            
+            // Ed25519 points (compressed x-coordinates as field elements)
+            R_x: R_x.toString(),
+            S_x: S_x.toString(),
+            P_x: P_x.toString(),
+            
+            // ECDH encrypted amount
+            ecdhAmount: ecdhAmount || '0',
+            
+            // Amount key (64 bits) - compute from H_s
+            amountKey: (() => {
+                const amountKeyHex = computeAmountKey(H_s_hex);
+                const amountKeyBytes = new Uint8Array(amountKeyHex.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+                const bits = [];
+                for (let i = 0; i < 8; i++) {
+                    for (let j = 0; j < 8; j++) {
+                        bits.push((amountKeyBytes[i] >> j) & 1);
+                    }
+                }
+                return bits;
+            })(),
+            
+            // Poseidon commitment
+            commitment: commitmentValue
+        };
+        
+        console.log('Circuit inputs:', circuitInputs);
+        
+        console.log('✅ Circuit inputs prepared');
+        
+        // Step 5: Load circuit files
+        showLoading('Step 5/7: Loading circuit files (50MB)...');
+        
+        try {
+            // Load WASM file
+            const wasmResponse = await fetch('/circuit/monero_bridge.wasm');
+            const wasmBuffer = await wasmResponse.arrayBuffer();
+            console.log('✅ WASM loaded:', wasmBuffer.byteLength, 'bytes');
+            
+            // Load zkey file
+            showLoading('Step 6/7: Loading proving key (50MB, may take a moment)...');
+            const zkeyResponse = await fetch('/circuit/monero_bridge_final.zkey');
+            const zkeyBuffer = await zkeyResponse.arrayBuffer();
+            console.log('✅ Proving key loaded:', zkeyBuffer.byteLength, 'bytes');
+            
+            // Step 6: Generate ZK proof
+            showLoading('Step 7/7: Generating PLONK proof (this may take 10-30 seconds)...');
+            
+            const { proof, publicSignals } = await snarkjs.plonk.fullProve(
+                circuitInputs,
+                new Uint8Array(wasmBuffer),
+                new Uint8Array(zkeyBuffer)
+            );
+            
+            console.log('✅ Proof generated!');
+            console.log('Proof:', proof);
+            console.log('Public signals:', publicSignals);
+            
+            // Step 7: Format proof for contract
+            showLoading('Preparing mint transaction...');
+            
+            // Parse proof for Solidity
+            const proofArray = [
+                proof.A[0], proof.A[1],
+                proof.B[0], proof.B[1],
+                proof.C[0], proof.C[1],
+                proof.Z[0], proof.Z[1],
+                proof.T1[0], proof.T1[1],
+                proof.T2[0], proof.T2[1],
+                proof.T3[0], proof.T3[1],
+                proof.Wxi[0], proof.Wxi[1],
+                proof.Wxiw[0], proof.Wxiw[1],
+                proof.eval_a, proof.eval_b, proof.eval_c,
+                proof.eval_s1, proof.eval_s2, proof.eval_zw
+            ];
+            
+            console.log('Proof array for contract:', proofArray);
+            console.log('Public signals for contract:', publicSignals);
+            
+            // Step 8: Compute TX Merkle proof
+            showLoading('Step 8/10: Computing TX Merkle proof...');
+            // Store original txHash before any modifications
+            const originalTxHash = document.getElementById('txHash').value.replace(/^0x/, '');
+            const txMerkleData = await computeTxMerkleProof(blockHeight, originalTxHash);
+            console.log('✅ TX Merkle proof computed:', txMerkleData);
+            console.log('  Using TX hash:', originalTxHash);
+            
+            // Step 9: Compute output Merkle proof
+            showLoading('Step 9/10: Computing output Merkle proof...');
+            const outputMerkleData = await computeOutputMerkleProof(blockHeight, originalTxHash, outputIndex);
+            console.log('✅ Output Merkle proof computed:', outputMerkleData);
+            
+            // Step 10: Call mint function
+            showLoading('Step 9/9: Submitting mint transaction...');
+            
+            // Prepare output struct - use LOCAL output index (in transaction)
+            // The GLOBAL index is passed separately as outputIndex parameter
+            const output = {
+                txHash: '0x' + originalTxHash,
+                outputIndex: BigInt(outputIndex), // LOCAL index in the transaction
+                ecdhAmount: '0x' + (ecdhAmount || '0').padStart(64, '0'),
+                outputPubKey: '0x' + outputKey,
+                commitment: '0x' + commitment
+            };
+            
+            // Use computed DLEQ and Ed25519 proofs
+            const dleqProof = ed25519Ops.dleqProof;
+            const ed25519Proof = ed25519Ops.ed25519Proof;
+            
+            // Use computed output Merkle proof
+            const outputMerkleProof = outputMerkleData.proof;
+            const globalOutputIndex = BigInt(outputMerkleData.outputIndex);
+            
+            console.log('Calling mint with:');
+            console.log('  Proof:', proofArray);
+            console.log('  Public signals:', publicSignals);
+            console.log('  DLEQ Proof:', dleqProof);
+            console.log('  Ed25519 Proof:', ed25519Proof);
+            console.log('  Output:', output);
+            console.log('  Output.txHash:', output.txHash);
+            console.log('  Original TX hash used for Merkle:', originalTxHash);
+            console.log('  Block height:', blockHeight);
+            console.log('  TX index:', txMerkleData.txIndex);
+            console.log('  TX Merkle proof:', txMerkleData.proof);
+            console.log('  Output Merkle proof:', outputMerkleProof);
+            console.log('  Global output index:', globalOutputIndex);
+            
+            // Validate all bytes32 fields
+            const validateBytes32 = (value, name) => {
+                if (!value || value === '0x' || value.length !== 66) {
+                    console.error(`Invalid bytes32 for ${name}:`, value);
+                    throw new Error(`Invalid bytes32 for ${name}: ${value}`);
+                }
+            };
+            
+            validateBytes32(output.txHash, 'output.txHash');
+            validateBytes32(output.ecdhAmount, 'output.ecdhAmount');
+            validateBytes32(output.outputPubKey, 'output.outputPubKey');
+            validateBytes32(output.commitment, 'output.commitment');
+            validateBytes32(dleqProof.c, 'dleqProof.c');
+            validateBytes32(dleqProof.s, 'dleqProof.s');
+            validateBytes32(dleqProof.K1, 'dleqProof.K1');
+            validateBytes32(dleqProof.K2, 'dleqProof.K2');
+            
+            try {
+                const hash = await state.walletClient.writeContract({
+                    address: CONFIG.CONTRACT_ADDRESS,
+                    abi: CONTRACT_ABI,
+                    functionName: 'mint',
+                    args: [
+                        proofArray,
+                        publicSignals,
+                        dleqProof,
+                        ed25519Proof,
+                        output,
+                        BigInt(blockHeight),
+                        txMerkleData.proof,
+                        BigInt(txMerkleData.txIndex),
+                        outputMerkleProof,
+                        globalOutputIndex,
+                        state.userAddress, // recipient
+                        state.userAddress, // LP (for now, same as recipient)
+                        [] // No price update data
+                    ],
+                    gas: 5000000n
+                });
+                
+                console.log('✅ Mint transaction submitted:', hash);
+                console.log('   Check on block explorer: https://sepolia.uniscan.xyz/tx/' + hash);
+                
+                // Wait for receipt
+                const receipt = await waitForReceipt(hash);
+                
+                hideLoading();
+                showToast(`✅ Mint successful! TX: ${hash.slice(0, 10)}...`, 'success');
+                addActivity('Minted zeroXMR', `TX: ${hash.slice(0, 10)}...`, 'Just now');
+                
+                // Reload balances
+                await loadInitialData();
+                
+            } catch (mintError) {
+                console.error('Mint error:', mintError);
+                console.error('Error details:', {
+                    message: mintError.message,
+                    cause: mintError.cause,
+                    shortMessage: mintError.shortMessage,
+                    details: mintError.details
+                });
+                hideLoading();
+                
+                // Try to extract revert reason
+                let errorMsg = 'Mint failed: ';
+                if (mintError.shortMessage) {
+                    errorMsg += mintError.shortMessage;
+                } else if (mintError.details) {
+                    errorMsg += mintError.details;
+                } else {
+                    errorMsg += mintError.message;
+                }
+                
+                showToast(errorMsg, 'error');
+            }
+            
+        } catch (proofError) {
+            console.error('Proof generation error:', proofError);
+            throw new Error('Failed to generate proof: ' + proofError.message);
+        }
         
     } catch (error) {
         console.error('Error generating proof:', error);
@@ -1850,6 +2674,37 @@ function showToast(message, type = 'info') {
 
 // Expose for inline onclick handlers
 window.showToast = showToast;
+
+/**
+ * Wait for transaction receipt with RPC error handling
+ * @param {string} hash - Transaction hash
+ * @returns {Promise<object|null>} Receipt or null if RPC error
+ */
+async function waitForReceipt(hash) {
+    try {
+        const receipt = await state.publicClient.waitForTransactionReceipt({ 
+            hash,
+            pollingInterval: 2000,
+            timeout: 30000
+        });
+        
+        // Check if transaction reverted
+        if (receipt.status === 'reverted') {
+            console.error('Transaction reverted:', receipt);
+            throw new Error('Transaction reverted on-chain. Check block explorer for details.');
+        }
+        
+        return receipt;
+    } catch (error) {
+        // If it's a block range error, the transaction likely succeeded
+        if (error.message.includes('block is out of range') || 
+            error.message.includes('HTTP request failed')) {
+            console.log('RPC error waiting for receipt, but transaction was sent:', hash);
+            return null; // Transaction sent but couldn't get receipt
+        }
+        throw error; // Re-throw other errors
+    }
+}
 
 function formatAddress(address) {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;

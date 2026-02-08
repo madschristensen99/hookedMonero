@@ -334,24 +334,21 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     }
     
     /**
-     * @notice LP deposits collateral (accepts ETH, converts to wstETH)
+     * @notice LP deposits collateral (accepts ETH directly)
+     * @dev For testnet: Accepts ETH directly without wrapping to wstETH
+     * @dev In production, this would wrap to wstETH for yield generation
      */
     function lpDeposit() external payable nonReentrant {
         require(msg.value > 0, "Zero amount");
         
-        // Wrap ETH to wstETH via direct transfer (wstETH accepts ETH)
-        uint256 wstETHBefore = wstETH.balanceOf(address(this));
+        // TESTNET: Accept ETH directly (1:1 ratio)
+        // In production, this would wrap to wstETH
+        uint256 collateralAmount = msg.value;
         
-        // Transfer ETH and receive wstETH
-        (bool success, ) = address(wstETH).call{value: msg.value}("");
-        require(success, "wstETH wrap failed");
+        lpInfo[msg.sender].collateralAmount += collateralAmount;
+        totalLPCollateral += collateralAmount;
         
-        uint256 wstETHReceived = wstETH.balanceOf(address(this)) - wstETHBefore;
-        
-        lpInfo[msg.sender].collateralAmount += wstETHReceived;
-        totalLPCollateral += wstETHReceived;
-        
-        emit LPDeposited(msg.sender, msg.value, wstETHReceived);
+        emit LPDeposited(msg.sender, msg.value, collateralAmount);
     }
     
     /**
@@ -370,14 +367,16 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     
     /**
      * @notice LP withdraws collateral (only down to 150% ratio)
+     * @dev For testnet: Sends ETH directly instead of wstETH
      */
-    function lpWithdraw(uint256 wstETHAmount) external nonReentrant {
+    function lpWithdraw(uint256 amount) external nonReentrant {
         LPInfo storage lp = lpInfo[msg.sender];
-        require(lp.collateralAmount >= wstETHAmount, "Insufficient collateral");
+        require(lp.collateralAmount >= amount, "Insufficient collateral");
         
         // Check LP maintains 150% ratio after withdrawal
-        uint256 remainingCollateral = lp.collateralAmount - wstETHAmount;
-        uint256 remainingValueEth = _wstETHToETH(remainingCollateral);
+        uint256 remainingCollateral = lp.collateralAmount - amount;
+        // TESTNET: Collateral is in ETH directly (1:1)
+        uint256 remainingValueEth = remainingCollateral;
         uint256 backedValueEth = _xmrToETH(lp.backedAmount);
         
         if (lp.backedAmount > 0) {
@@ -385,13 +384,14 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
             require(ratio >= SAFE_RATIO, "Would drop below 150%");
         }
         
-        lp.collateralAmount -= wstETHAmount;
-        totalLPCollateral -= wstETHAmount;
+        lp.collateralAmount -= amount;
+        totalLPCollateral -= amount;
         
-        // Transfer wstETH to LP
-        wstETH.transfer(msg.sender, wstETHAmount);
+        // TESTNET: Transfer ETH directly to LP
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "ETH transfer failed");
         
-        emit LPWithdrew(msg.sender, wstETHAmount, remainingValueEth);
+        emit LPWithdrew(msg.sender, amount, remainingValueEth);
     }
     
     /**
@@ -711,12 +711,13 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
         
         request.defaulted = true;
         
-        // Transfer wstETH collateral to user
-        wstETH.transfer(request.user, request.collateralLocked);
+        // TESTNET: Transfer ETH collateral directly to user
+        (bool success1, ) = request.user.call{value: request.collateralLocked}("");
+        require(success1, "Collateral transfer failed");
         
         // Return user's deposit
-        (bool success, ) = request.user.call{value: request.depositAmount}("");
-        require(success, "Deposit refund failed");
+        (bool success2, ) = request.user.call{value: request.depositAmount}("");
+        require(success2, "Deposit refund failed");
         
         emit BurnDefaulted(burnId, request.collateralLocked);
     }
@@ -891,17 +892,19 @@ contract WrappedMonero is ERC20, ERC20Permit, ReentrancyGuard {
     /**
      * @notice Convert wstETH to ETH value (accounting for stETH appreciation)
      */
-    function _wstETHToETH(uint256 wstETHAmount) internal view returns (uint256) {
-        // wstETH.stEthPerToken() returns how much stETH 1 wstETH is worth
-        // stETH is 1:1 with ETH for valuation purposes
-        return wstETH.getStETHByWstETH(wstETHAmount);
+    function _wstETHToETH(uint256 wstETHAmount) internal pure returns (uint256) {
+        // TESTNET: Using ETH directly (1:1 ratio)
+        // In production, would call: wstETH.getStETHByWstETH(wstETHAmount)
+        return wstETHAmount;
     }
     
     /**
      * @notice Convert ETH value to wstETH amount
      */
-    function _ethToWstETH(uint256 ethAmount) internal view returns (uint256) {
-        return wstETH.getWstETHByStETH(ethAmount);
+    function _ethToWstETH(uint256 ethAmount) internal pure returns (uint256) {
+        // TESTNET: Using ETH directly (1:1 ratio)
+        // In production, would call: wstETH.getWstETHByStETH(ethAmount)
+        return ethAmount;
     }
     
     // ════════════════════════════════════════════════════════════════════════

@@ -322,6 +322,7 @@ impl MoneroRpcClient {
 
         let transactions = self.get_transactions(tx_hashes).await?;
         let mut all_outputs = Vec::new();
+        let mut global_output_index = 0u64; // Track global output index across all transactions
 
         for tx in transactions {
             let tx_json: TransactionJson = match serde_json::from_str(&tx.as_json) {
@@ -377,11 +378,12 @@ impl MoneroRpcClient {
 
                 all_outputs.push(MoneroOutput {
                     tx_hash,
-                    output_index: i as u64,
+                    output_index: global_output_index, // Use global index, not local
                     ecdh_amount,
                     output_pub_key: output_pub_key_bytes,
                     commitment: commitment_bytes,
                 });
+                global_output_index += 1;
             }
         }
 
